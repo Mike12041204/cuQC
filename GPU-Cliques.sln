@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.6.33815.320
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "GPU-Cliques", "GPU-Cliques\GPU-Cliques.vcxproj", "{B6358A1D-7022-4349-B6D9-9BE8C5CD8420}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{B6358A1D-7022-4349-B6D9-9BE8C5CD8420}.Debug|x64.ActiveCfg = Debug|x64
+		{B6358A1D-7022-4349-B6D9-9BE8C5CD8420}.Debug|x64.Build.0 = Debug|x64
+		{B6358A1D-7022-4349-B6D9-9BE8C5CD8420}.Release|x64.ActiveCfg = Release|x64
+		{B6358A1D-7022-4349-B6D9-9BE8C5CD8420}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {B2F1BFE2-AB74-4BBB-8810-06D229583DD3}
+	EndGlobalSection
+EndGlobal
