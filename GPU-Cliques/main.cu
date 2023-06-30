@@ -293,6 +293,8 @@ int sort_vertices(const void* a, const void* b);
 inline void chkerr(cudaError_t code);
 void print_CPU_Data(CPU_Data& host_data);
 void print_GPU_Data(GPU_Data& device_data);
+void print_GPU_Graph(GPU_Graph& device_graph, CPU_Graph& host_graph);
+void print_WTask_Buffers(GPU_Data& device_data);
 
 // KERNELS
 __global__ void expand_level(GPU_Data device_data, GPU_Cliques device_cliques, GPU_Graph graph);
@@ -372,15 +374,15 @@ void allocate_graph(GPU_Graph& device_graph, CPU_Graph& input_graph)
     chkerr(cudaMalloc((void**)&device_graph.number_of_edges, sizeof(int)));
     chkerr(cudaMalloc((void**)&device_graph.onehop_neighbors, sizeof(int) * input_graph.number_of_onehop_neighbors));
     chkerr(cudaMalloc((void**)&device_graph.onehop_offsets, sizeof(uint64_t) * (input_graph.number_of_vertices + 1)));
-    chkerr(cudaMalloc((void**)&device_graph.twohop_neighbors, sizeof(int) * input_graph.number_of_onehop_neighbors));
+    chkerr(cudaMalloc((void**)&device_graph.twohop_neighbors, sizeof(int) * input_graph.number_of_twohop_neighbors));
     chkerr(cudaMalloc((void**)&device_graph.twohop_offsets, sizeof(uint64_t) * (input_graph.number_of_vertices + 1)));
 
     chkerr(cudaMemcpy(device_graph.number_of_vertices, &(input_graph.number_of_vertices), sizeof(int), cudaMemcpyHostToDevice));
     chkerr(cudaMemcpy(device_graph.number_of_edges, &(input_graph.number_of_edges), sizeof(int), cudaMemcpyHostToDevice));
-    chkerr(cudaMemcpy(device_graph.onehop_neighbors, &(input_graph.onehop_neighbors), sizeof(int) * input_graph.number_of_onehop_neighbors, cudaMemcpyHostToDevice));
-    chkerr(cudaMemcpy(device_graph.onehop_offsets, &(input_graph.onehop_offsets), sizeof(int) * (input_graph.number_of_vertices + 1), cudaMemcpyHostToDevice));
-    chkerr(cudaMemcpy(device_graph.twohop_neighbors, &(input_graph.twohop_neighbors), sizeof(int) * input_graph.number_of_onehop_neighbors, cudaMemcpyHostToDevice));
-    chkerr(cudaMemcpy(device_graph.twohop_offsets, &(input_graph.twohop_offsets), sizeof(int) * (input_graph.number_of_vertices + 1), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(device_graph.onehop_neighbors, input_graph.onehop_neighbors, sizeof(int) * input_graph.number_of_onehop_neighbors, cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(device_graph.onehop_offsets, input_graph.onehop_offsets, sizeof(uint64_t) * (input_graph.number_of_vertices + 1), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(device_graph.twohop_neighbors, input_graph.twohop_neighbors, sizeof(int) * input_graph.number_of_twohop_neighbors, cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(device_graph.twohop_offsets, input_graph.twohop_offsets, sizeof(uint64_t) * (input_graph.number_of_vertices + 1), cudaMemcpyHostToDevice));
 }
 
 // initializes minimum degrees array
@@ -411,6 +413,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results, GPU_Graph& device_gr
     move_to_gpu(host_data, device_data);
 
     // DEBUG - PRINT
+    print_GPU_Graph(device_graph, input_graph);
     print_CPU_Data(host_data);
     print_GPU_Data(device_data);
 
@@ -420,6 +423,9 @@ void search(CPU_Graph& input_graph, ofstream& temp_results, GPU_Graph& device_gr
         expand_level<<<NUM_OF_BLOCKS, BLOCK_SIZE>>>(device_data, device_cliques, device_graph);
 
         cudaDeviceSynchronize();
+
+        // DEBUG - PRINT
+        print_WTask_Buffers(device_data);
 
         write_level<<<NUM_OF_BLOCKS, BLOCK_SIZE>>>(device_data, device_cliques);
 
@@ -927,7 +933,7 @@ void print_GPU_Data(GPU_Data& device_data)
     cout << " --- (GPU_Data)device_data details --- " << endl;
     cout << endl << "Tasks1: Level: " << (*current_level) << " Size: " << (*tasks1_count) << endl;
     cout << endl << "Offsets:" << endl;
-    for (int i = 0; i < (*tasks1_count); i++) {
+    for (int i = 0; i <= (*tasks1_count); i++) {
         cout << tasks1_offset[i] << " " << flush;
     }
     cout << endl << "Vertex:" << endl;
@@ -954,7 +960,7 @@ void print_GPU_Data(GPU_Data& device_data)
 
     cout << endl << "Tasks2: " << "Size: " << (*tasks2_count) << endl;
     cout << endl << "Offsets:" << endl;
-    for (int i = 0; i < (*tasks2_count); i++) {
+    for (int i = 0; i <= (*tasks2_count); i++) {
         cout << tasks2_offset[i] << " " << flush;
     }
     cout << endl << "Vertex:" << endl;
@@ -981,7 +987,7 @@ void print_GPU_Data(GPU_Data& device_data)
 
     cout << endl << "Buffer: " << "Size: " << (*buffer_count) << endl;
     cout << endl << "Offsets:" << endl;
-    for (int i = 0; i < (*buffer_count); i++) {
+    for (int i = 0; i <= (*buffer_count); i++) {
         cout << buffer_offset[i] << " " << flush;
     }
     cout << endl << "Vertex:" << endl;
@@ -1044,7 +1050,7 @@ void print_CPU_Data(CPU_Data& host_data)
     cout << endl << " --- (CPU_Data)host_data details --- " << endl;
     cout << endl << "Tasks1: " << "Size: " << (*(host_data.tasks1_count)) << endl;
     cout << endl << "Offsets:" << endl;
-    for (uint64_t i = 0; i < (*(host_data.tasks1_count)); i++) {
+    for (uint64_t i = 0; i <= (*(host_data.tasks1_count)); i++) {
         cout << host_data.tasks1_offset[i] << " ";
     }
     cout << endl << "Vertex:" << endl;
@@ -1070,7 +1076,7 @@ void print_CPU_Data(CPU_Data& host_data)
 
     cout << endl << endl << "Buffer: " << "Size: " << (*(host_data.buffer_count)) << endl;
     cout << endl << "Offsets:" << endl;
-    for (uint64_t i = 0; i < (*(host_data.buffer_count)); i++) {
+    for (uint64_t i = 0; i <= (*(host_data.buffer_count)); i++) {
         cout << host_data.buffer_offset[i] << " ";
     }
     cout << endl << "Vertex:" << endl;
@@ -1105,10 +1111,42 @@ inline void chkerr(cudaError_t code)
     }
 }
 
-// TODO - implement -> CURSOR <-
-void print_CPU_Graph()
+void print_GPU_Graph(GPU_Graph& device_graph, CPU_Graph& host_graph)
 {
+    int* number_of_vertices = new int;
+    int* number_of_edges = new int;
 
+    int* onehop_neighbors = new int[host_graph.number_of_onehop_neighbors];
+    uint64_t * onehop_offsets = new uint64_t[(host_graph.number_of_vertices)+1];
+    int* twohop_neighbors = new int[host_graph.number_of_twohop_neighbors];
+    uint64_t * twohop_offsets = new uint64_t[(host_graph.number_of_vertices)+1];
+
+    chkerr(cudaMemcpy(number_of_vertices, device_graph.number_of_vertices, sizeof(int), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(number_of_edges, device_graph.number_of_edges, sizeof(int), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(onehop_neighbors, device_graph.onehop_neighbors, sizeof(int)*host_graph.number_of_onehop_neighbors, cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(onehop_offsets, device_graph.onehop_offsets, sizeof(uint64_t)*(host_graph.number_of_vertices+1), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(twohop_neighbors, device_graph.twohop_neighbors, sizeof(int)*host_graph.number_of_twohop_neighbors, cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(twohop_offsets, device_graph.twohop_offsets, sizeof(uint64_t)*(host_graph.number_of_vertices+1), cudaMemcpyDeviceToHost));
+
+    cout << endl << " --- (GPU_Graph)device_graph details --- " << endl;
+    cout << endl << "|V|: " << (*number_of_vertices) << " |E|: " << (*number_of_edges) << endl;
+    cout << endl << "Onehop Offsets:" << endl;
+    for (uint64_t i = 0; i <= (*number_of_vertices); i++) {
+        cout << onehop_offsets[i] << " ";
+    }
+    cout << endl << "Onehop Neighbors:" << endl;
+    for (uint64_t i = 0; i < host_graph.number_of_onehop_neighbors; i++) {
+        cout << onehop_neighbors[i] << " ";
+    }
+    cout << endl << "Twohop Offsets:" << endl;
+    for (uint64_t i = 0; i <= (*number_of_vertices); i++) {
+        cout << twohop_offsets[i] << " ";
+    }
+    cout << endl << "Twohop Neighbors:" << endl;
+    for (uint64_t i = 0; i < host_graph.number_of_twohop_neighbors; i++) {
+        cout << twohop_neighbors[i] << " ";
+    }
+    cout << endl << endl;
 }
 
 int sort_vertices(const void* a, const void* b)
@@ -1195,6 +1233,59 @@ int sort_vertices(const void* a, const void* b)
     return 0;
 }
 
+void print_WTask_Buffers(GPU_Data& device_data)
+{
+    int warp_count = (NUM_OF_BLOCKS * BLOCK_SIZE) / 32;
+    uint64_t* wtasks_count = new uint64_t[warp_count];
+    uint64_t* wtasks_offset = new uint64_t[warp_count*WTASKS_OFFSET_SIZE];
+    int* wtasks_vertex = new int[warp_count*WTASKS_SIZE];
+    int* wtasks_label = new int[warp_count * WTASKS_SIZE];
+    int* wtasks_indeg = new int[warp_count * WTASKS_SIZE];
+    int* wtasks_exdeg = new int[warp_count * WTASKS_SIZE];
+    int* wtasks_lvl2adj = new int[warp_count * WTASKS_SIZE];
+
+    chkerr(cudaMemcpy(wtasks_count, device_data.wtasks_count, sizeof(uint64_t)*warp_count, cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(wtasks_offset, device_data.wtasks_offset, sizeof(uint64_t) * (warp_count*WTASKS_OFFSET_SIZE), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(wtasks_vertex, device_data.wtasks_vertex, sizeof(int) * (warp_count*WTASKS_SIZE), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(wtasks_label, device_data.wtasks_label, sizeof(int) * (warp_count * WTASKS_SIZE), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(wtasks_indeg, device_data.wtasks_indeg, sizeof(int) * (warp_count * WTASKS_SIZE), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(wtasks_exdeg, device_data.wtasks_exdeg, sizeof(int) * (warp_count * WTASKS_SIZE), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(wtasks_lvl2adj, device_data.wtasks_lvl2adj, sizeof(int) * (warp_count * WTASKS_SIZE), cudaMemcpyDeviceToHost));
+
+    cout << endl << " --- Warp Task Buffers details --- " << endl;
+    for (int i = 0; i < warp_count; i++) {
+        int wtasks_offset_start = WTASKS_OFFSET_SIZE * i;
+        int wtasks_start = WTASKS_SIZE * i;
+
+        cout << endl << "Warp " << i << ": " << "Size : " << wtasks_count[i] << endl;
+        cout << endl << "Offsets:" << endl;
+        for (int j = 0; j <= wtasks_count[i]; j++) {
+            cout << wtasks_offset[wtasks_offset_start+j] << " ";
+        }
+        cout << endl << "Vertex:" << endl;
+        for (int j = 0; j < wtasks_offset[wtasks_offset_start+wtasks_count[i]]; j++) {
+            cout << wtasks_vertex[wtasks_start+j] << " ";
+        }
+        cout << endl << "Label:" << endl;
+        for (int j = 0; j < wtasks_offset[wtasks_offset_start + wtasks_count[i]]; j++) {
+            cout << wtasks_label[wtasks_start + j] << " ";
+        }
+        cout << endl << "Indeg:" << endl;
+        for (int j = 0; j < wtasks_offset[wtasks_offset_start + wtasks_count[i]]; j++) {
+            cout << wtasks_indeg[wtasks_start + j] << " ";
+        }
+        cout << endl << "Exdeg:" << endl;
+        for (int j = 0; j < wtasks_offset[wtasks_offset_start + wtasks_count[i]]; j++) {
+            cout << wtasks_exdeg[wtasks_start + j] << " ";
+        }
+        cout << endl << "Lvl2adj:" << endl;
+        for (int j = 0; j < wtasks_offset[wtasks_offset_start + wtasks_count[i]]; j++) {
+            cout << wtasks_lvl2adj[wtasks_start + j] << " ";
+        }
+    }
+    cout << endl << endl;
+}
+
 
 
 // --- DEVICE KERNELS ---
@@ -1237,6 +1328,9 @@ __global__ void expand_level(GPU_Data device_data, GPU_Cliques device_cliques, G
     }
 
     // vertices array is in shared memory
+    __shared__ int number_of_members;
+    __shared__ int number_of_candidates;
+    __shared__ int total_vertices;
     __shared__ Vertex vertices[VERTICES_SIZE];
 
     // --- CURRENT LEVEL ---
@@ -1271,9 +1365,11 @@ __global__ void expand_level(GPU_Data device_data, GPU_Cliques device_cliques, G
             __syncwarp();
 
             // INITIALIZE NEW VERTICES
-            int number_of_members = num_mem;
-            int number_of_candidates = num_cand;
-            int total_vertices = tot_vert;
+            if (lane_idx == 0) {
+                number_of_members = num_mem;
+                number_of_candidates = num_cand;
+                total_vertices = tot_vert;
+            }
             for (int k = lane_idx; k < total_vertices; k += WARP_SIZE) {
                 vertices[k].vertexid = read_vertices[start + k];
                 vertices[k].label = read_labels[start + k];
@@ -1430,10 +1526,9 @@ __device__ void add_one_vertex(int& lane_idx, Vertex* vertices, int& total_verti
 
     if (lane_idx == 0) {
         vertices[total_vertices - 1].label = 1;
+        number_of_members++;
+        number_of_candidates--;
     }
-
-    number_of_members++;
-    number_of_candidates--;
 
     pvertexid = vertices[total_vertices - 1].vertexid;
     pneighbors_start = graph.onehop_offsets[pvertexid];
@@ -1494,8 +1589,8 @@ __device__ void add_one_vertex(int& lane_idx, Vertex* vertices, int& total_verti
             }
         }
     }
-    total_vertices -= number_of_removed_candidates;
-    number_of_candidates -= number_of_removed_candidates;
+    atomicAdd(total_vertices, (-number_of_removed_candidates));
+    atomicAdd(number_of_candidates, (-number_of_removed_candidates));
 }
 
 __device__ void check_for_clique(int& number_of_members, int& lane_idx, int& warp_idx, Vertex* vertices, int& wcliques_write, int& wcliques_offset_write,
