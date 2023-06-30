@@ -39,7 +39,7 @@ using namespace std;
 // TODO - store vertices in global memory to allow the usage of more threads per sm
 // shared memory size: 12.300 ints (75% used)
 #define VERTICES_SIZE 2000
-
+ 
 #define BLOCK_SIZE 32
 #define NUM_OF_BLOCKS 32
 #define WARP_SIZE 32
