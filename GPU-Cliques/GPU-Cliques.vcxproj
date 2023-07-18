@@ -15,6 +15,10 @@
   </ItemGroup>
   <ItemGroup>
     <Text Include="graph8.txt" />
+    <Text Include="graph7.txt" />
+    <Text Include="graph6.txt" />
+    <Text Include="graph9.txt" />
+    <Text Include="GSE1730_q.txt" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{B6358A1D-7022-4349-B6D9-9BE8C5CD8420}</ProjectGuid>
