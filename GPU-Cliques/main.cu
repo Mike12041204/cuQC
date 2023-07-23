@@ -334,6 +334,12 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+    // TIME
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord(start);
+
     // GRAPH / MINDEGS
     cout << ">:PRE-PROCESSING" << endl;
     CPU_Graph input_graph(graph_stream);
@@ -353,6 +359,17 @@ int main(int argc, char* argv[])
 
     // RM NON-MAX
     RemoveNonMax("temp.txt", argv[4]);
+
+    // Record the stop event
+    cudaEventRecord(stop);
+
+    // TIME
+    cudaEventSynchronize(stop);
+    float milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    cout << ">:TIME: " << milliseconds << " ms" << endl;
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
 
     cout << ">:PROGRAM END" << endl;
     return 0;
@@ -409,8 +426,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results, GPU_Graph& device_gr
     move_to_gpu(host_data, device_data);
     cudaDeviceSynchronize();
 
-    // DEBUG - PRINT
-    int count = 0;
+    // DEBUG
     //print_GPU_Graph(device_graph, input_graph);
     //print_CPU_Data(host_data);
     //print_GPU_Data(device_data);
@@ -428,9 +444,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results, GPU_Graph& device_gr
         cudaDeviceSynchronize();
 
         // DEBUG
-        if (count == 27) {
-            //print_WClique_Buffers(device_cliques);
-        }
+        //print_WClique_Buffers(device_cliques);
         //print_WTask_Buffers(device_data);
 
         transfer_buffers<<<NUM_OF_BLOCKS, BLOCK_SIZE>>>(device_data, device_cliques);
@@ -451,23 +465,8 @@ void search(CPU_Graph& input_graph, ofstream& temp_results, GPU_Graph& device_gr
         // DEBUG
         //print_GPU_Data(device_data);
         //print_GPU_Cliques(device_cliques);
-        if (count % 1 == 0 && count != 0) {
-            //print_GPU_Data(device_data);
-            //print_GPU_Cliques(device_cliques);
-            print_Data_Sizes(device_data, device_cliques);
-        }
-        cout << "#: " << count << " " << flush;
-        count++;
-        bool* debug = new bool;
-        chkerr(cudaMemcpy(debug, device_data.debug, sizeof(bool), cudaMemcpyDeviceToHost));
-        if ((*debug)) {
-            //cout << "!!! FLAG !!!" << endl;
-            //print_GPU_Cliques(device_cliques);
-        }
-        chkerr(cudaMemset(device_data.debug, false, sizeof(bool)));
+        //print_Data_Sizes(device_data, device_cliques);
     }
-    // DEBUG
-    //print_GPU_Cliques(device_cliques);
 
     dump_cliques(host_cliques, device_cliques, temp_results);
 
@@ -1667,8 +1666,14 @@ __global__ void expand_level(GPU_Data device_data, GPU_Cliques device_cliques, G
         lookahead_sucess = !(__any_sync(0xFFFFFFFF, !lookahead_sucess));
 
         if (lookahead_sucess) {
+            // DEBUG
+            if (((*(device_data.current_level)) == 23) && (warp_idx == 17)) {
+                int temp;
+                temp = 10;
+            }
+
             // write to cliques
-            uint64_t start_write = wcliques_write + device_cliques.wcliques_offset[(device_cliques.wcliques_count[warp_idx])];
+            uint64_t start_write = wcliques_write + device_cliques.wcliques_offset[wcliques_offset_write + (device_cliques.wcliques_count[warp_idx])];
             for (int j = lane_idx; j < tot_vert[warp_in_block_idx]; j+=WARP_SIZE) {
                 device_cliques.wcliques_vertex[start_write + j] = read_vertices[start[warp_in_block_idx] + j].vertexid;
             }
@@ -1840,10 +1845,6 @@ __global__ void transfer_buffers(GPU_Data device_data, GPU_Cliques device_clique
 
     //move to cliques
     for (int i = lane_idx + 1; i <= cliques_count; i += WARP_SIZE) {
-        if (device_cliques.wcliques_offset[wcliques_offset_write + i] + cliques_start + cliques_write == 14349) {
-            int temp;
-            temp = 10;
-        }
         device_cliques.cliques_offset[cliques_offset_start + cliques_offset_write + i - 2] = device_cliques.wcliques_offset[wcliques_offset_write + i] + cliques_start + cliques_write;
     }
     for (int i = lane_idx; i < cliques_size; i += WARP_SIZE) {
@@ -2163,7 +2164,14 @@ __device__ void check_for_clique(int number_of_members, int lane_idx, int warp_i
 
     // if clique write to warp buffer for cliques
     if (clique) {
-        uint64_t start_write = wcliques_write + device_cliques.wcliques_offset[(device_cliques.wcliques_count[warp_idx])];
+        uint64_t start_write = wcliques_write + device_cliques.wcliques_offset[wcliques_offset_write + (device_cliques.wcliques_count[warp_idx])];
+
+        // DEBUG
+        if ((*(device_data.current_level)) == 23 && warp_idx == 17) {
+            int temp;
+            temp = 10;
+        }
+
         for (int k = lane_idx; k < number_of_members; k += WARP_SIZE) {
             device_cliques.wcliques_vertex[start_write + k] = vertices[k].vertexid;
         }

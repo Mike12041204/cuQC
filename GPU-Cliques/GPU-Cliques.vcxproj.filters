@@ -9,5 +9,6 @@
     <Text Include="graph6.txt" />
     <Text Include="graph9.txt" />
     <Text Include="GSE1730_q.txt" />
+    <Text Include="GSE10158_q.txt" />
   </ItemGroup>
 </Project>
