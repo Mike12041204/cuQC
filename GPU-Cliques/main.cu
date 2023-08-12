@@ -2077,6 +2077,7 @@ __device__ void add_one_vertex(Vertex* vertices, Warp_Data1& warp_data, GPU_Grap
     int pvertexid;
     int number_of_removed_candidates;
     bool failed_found;
+    bool invalid_bounds;
 
     if ((idx % WARP_SIZE) == 0) {
         vertices[warp_data.total_vertices[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] - 1].label = 1;
