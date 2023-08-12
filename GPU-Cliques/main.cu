@@ -40,7 +40,7 @@ using namespace std;
 // shared memory size: 12.300 ints
 #define VERTICES_SIZE 75
  
-#define BLOCK_SIZE 512
+#define BLOCK_SIZE 128
 #define NUM_OF_BLOCKS 22
 #define WARP_SIZE 32
 
@@ -1881,8 +1881,6 @@ __global__ void expand_level(GPU_Data device_data, GPU_Cliques device_cliques, G
     }
 }
 
-// CURSOR - optimize all these methods to allow for complete thread utilization
-
 __global__ void transfer_buffers(GPU_Data device_data, GPU_Cliques device_cliques)
 {
     // THREAD INFO
@@ -2337,10 +2335,14 @@ __device__ void calculate_LU_bounds(Vertex* vertices, GPU_Data& device_data, War
     int min_clq_totaldeg;
     int sum_clq_indeg;
 
+    int sum_candidate_indeg;
+
     min_clq_indeg = vertices[0].indeg;
     min_indeg_exdeg = vertices[0].exdeg;
     min_clq_totaldeg = vertices[0].indeg + vertices[0].exdeg;
     sum_clq_indeg = 0;
+
+    sum_candidate_indeg = 0;
 
     if ((idx % WARP_SIZE) == 0) {
         warp_data.sum_candidate_indeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = 0;
@@ -2374,7 +2376,6 @@ __device__ void calculate_LU_bounds(Vertex* vertices, GPU_Data& device_data, War
             min_clq_totaldeg = vertices[index].indeg + vertices[index].exdeg;
         }
     }
-    __syncwarp();
 
     // first thread in warp handle the sum
     if ((idx % WARP_SIZE) == 0) {
@@ -2395,7 +2396,7 @@ __device__ void calculate_LU_bounds(Vertex* vertices, GPU_Data& device_data, War
                 warp_data.min_indeg_exdeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = min_indeg_exdeg;
             }
             else if (min_clq_indeg == warp_data.min_clq_indeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]) {
-                if (vertices[index].exdeg < warp_data.min_indeg_exdeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]) {
+                if (min_indeg_exdeg < warp_data.min_indeg_exdeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]) {
                     warp_data.min_indeg_exdeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = min_indeg_exdeg;
                 }
             }
@@ -2404,103 +2405,111 @@ __device__ void calculate_LU_bounds(Vertex* vertices, GPU_Data& device_data, War
                 warp_data.min_clq_totaldeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = min_clq_totaldeg;
             }
         }
+        __syncwarp();
     }
     __syncwarp();
 
-    if (warp_data.min_clq_indeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] < device_data.minimum_degrees[warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]])
-    {
-        // lower
-        if ((idx % WARP_SIZE) == 0) {
+    // CRITICAL SECTION - unsure how to parallelize this, very complex
+    if ((idx % WARP_SIZE) == 0) {
+        if (warp_data.min_clq_indeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] < device_data.minimum_degrees[warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]])
+        {
+            // lower
             warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = device_get_mindeg(warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))], device_data) -
                 min_clq_indeg;
 
-            while (warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] <= warp_data.min_indeg_exdeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] && 
-                warp_data.min_clq_indeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] + warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] < 
+            while (warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] <= warp_data.min_indeg_exdeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] &&
+                warp_data.min_clq_indeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] + warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] <
                 device_data.minimum_degrees[warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] + warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]]) {
                 warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]++;
             }
 
-            if (warp_data.min_clq_indeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] + warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] < 
+            if (warp_data.min_clq_indeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] + warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] <
                 device_data.minimum_degrees[warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] + warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]]) {
+                // TODO - just use invalid bounds
                 warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] + 1;
                 invalid_bounds = true;
             }
 
             // upper
-            warp_data.Upper_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = floor(warp_data.min_clq_totaldeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] / 
+            warp_data.Upper_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = floor(warp_data.min_clq_totaldeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] /
                 (*(device_data.minimum_degree_ratio))) + 1 - warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))];
 
-            // CURSOR
-
-            if (Upper_bound > number_of_new_candidates) {
-                Upper_bound = number_of_new_candidates;
-            }
-        }
-
-        // tighten
-        if (Lower_bound < Upper_bound) {
-            // tighten lower
-            for (index = 0; index < Lower_bound; index++) {
-                sum_candidate_indeg += new_vertices[number_of_new_vertices + index].indeg;
+            if (warp_data.Upper_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] > warp_data.number_of_candidates[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]) {
+                warp_data.Upper_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = warp_data.number_of_candidates[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))];
             }
 
-            while (index < Upper_bound && sum_clq_indeg + sum_candidate_indeg < number_of_new_vertices * minimum_degrees[number_of_new_vertices + index]) {
-                sum_candidate_indeg += new_vertices[number_of_new_vertices + index].indeg;
-                index++;
-            }
+            // tighten
+            if (warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] < warp_data.Upper_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]) {
+                // tighten lower
+                for (index = 0; index < warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]; index++) {
+                    sum_candidate_indeg += vertices[warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] + index].indeg;
+                }
 
-            if (sum_clq_indeg + sum_candidate_indeg < number_of_new_vertices * minimum_degrees[number_of_new_vertices + index]) {
-                Lower_bound = Upper_bound + 1;
-                invalid_bounds = true;
-            }
-            else {
-                Lower_bound = index;
-
-                tightened_Upper_bound = index;
-
-                while (index < Upper_bound) {
-                    sum_candidate_indeg += new_vertices[number_of_new_vertices + index].indeg;
-
+                while (index < warp_data.Upper_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] && warp_data.sum_clq_indeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] + sum_candidate_indeg 
+                    < warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] * 
+                    device_data.minimum_degrees[warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] + index]) {
+                    sum_candidate_indeg += vertices[warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] + index].indeg;
                     index++;
+                }
 
-                    if (sum_clq_indeg + sum_candidate_indeg >= number_of_new_vertices * minimum_degrees[number_of_new_vertices + index]) {
-                        tightened_Upper_bound = index;
+                if (warp_data.sum_clq_indeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] + sum_candidate_indeg < warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] * 
+                    device_data.minimum_degrees[warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] + index]) {
+                    // TODO - just use invalid bounds
+                    warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = warp_data.Upper_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] + 1;
+                    invalid_bounds = true;
+                } else {
+                    warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = index;
+
+                    warp_data.tightened_Upper_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = index;
+
+                    while (index < warp_data.Upper_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]) {
+                        sum_candidate_indeg += vertices[warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] + index].indeg;
+
+                        index++;
+
+                        if (warp_data.sum_clq_indeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] + sum_candidate_indeg >= warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] 
+                            * device_data.minimum_degrees[warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] + index]) {
+                            warp_data.tightened_Upper_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = index;
+                        }
+                    }
+
+                    if (warp_data.Upper_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] > warp_data.tightened_Upper_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]) {
+                        warp_data.Upper_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = warp_data.tightened_Upper_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))];
+                    }
+
+                    if (warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] > 1) {
+                        warp_data.minimum_external_degree[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = device_get_mindeg(warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] 
+                            + warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))], device_data);
                     }
                 }
+            }
+        } else {
+            warp_data.minimum_external_degree[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = device_get_mindeg(warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] + 1, 
+                device_data);
 
-                if (Upper_bound > tightened_Upper_bound) {
-                    Upper_bound = tightened_Upper_bound;
-                }
+            warp_data.Upper_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))];
 
-                if (Lower_bound > 1) {
-                    minimum_external_degree = get_mindeg(number_of_new_vertices + Lower_bound);
-                }
+            if (warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] < (*(device_data.minimum_clique_size))) {
+                warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = (*(device_data.minimum_clique_size)) - warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))];
+            }
+            else {
+                warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = 0;
             }
         }
-    }
-    else {
-        minimum_external_degree = get_mindeg(number_of_new_vertices + 1);
 
-        Upper_bound = number_of_new_candidates;
-
-        if (number_of_new_vertices < minimum_clique_size) {
-            Lower_bound = minimum_clique_size - number_of_new_vertices;
+        if (warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] + warp_data.Upper_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] < (*(device_data.minimum_clique_size))) {
+            invalid_bounds = true;
         }
-        else {
-            Lower_bound = 0;
+
+        if (warp_data.Upper_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] < 0 || warp_data.Upper_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] < 
+            warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]) {
+            invalid_bounds = true;
         }
-    }
 
-    if (number_of_new_vertices + Upper_bound < minimum_clique_size) {
-        invalid_bounds = true;
-    }
-
-    if (Upper_bound < 0 || Upper_bound < Lower_bound) {
-        invalid_bounds = true;
-    }
-
-    if (invalid_bounds) {
-        break;
+        if (invalid_bounds) {
+            // TODO - if invalid bound communicate this to the program outside the method, probably by setting total_vertices to 0
+            return;
+        }
     }
 }
 
