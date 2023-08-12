@@ -1837,6 +1837,8 @@ __global__ void expand_level(GPU_Data device_data, GPU_Cliques device_cliques, G
                 continue;
             }
 
+            // TODO - CRITICAL VERTEX PRUNING
+
             // HANDLE CLIQUES
             if (warp_data.number_of_members[warp_in_block_idx] >= (*device_data.minimum_clique_size)) {
                 check_for_clique(warp_data, vertices, device_cliques, device_data, idx);
