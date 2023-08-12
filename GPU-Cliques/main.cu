@@ -229,6 +229,7 @@ struct GPU_Data
     bool* maximal_expansion;
     bool* dumping_cliques;
 
+    double* minimum_degree_ratio;
     int* minimum_degrees;
     int* minimum_clique_size;
 
@@ -285,6 +286,17 @@ struct Warp_Data1
     int number_of_candidates[(BLOCK_SIZE / WARP_SIZE)];
     int total_vertices[(BLOCK_SIZE / WARP_SIZE)];
     Vertex shared_vertices[VERTICES_SIZE * (BLOCK_SIZE / WARP_SIZE)];
+
+    int minimum_external_degree[(BLOCK_SIZE / WARP_SIZE)];
+    int Lower_bound[(BLOCK_SIZE / WARP_SIZE)];
+    int Upper_bound[(BLOCK_SIZE / WARP_SIZE)];
+
+    int tightened_Upper_bound[(BLOCK_SIZE / WARP_SIZE)];
+    int min_clq_indeg[(BLOCK_SIZE / WARP_SIZE)];
+    int min_indeg_exdeg[(BLOCK_SIZE / WARP_SIZE)];
+    int min_clq_totaldeg[(BLOCK_SIZE / WARP_SIZE)];
+    int sum_clq_indeg[(BLOCK_SIZE / WARP_SIZE)];
+    int sum_candidate_indeg[(BLOCK_SIZE / WARP_SIZE)];
 };
 
 struct Warp_Data2
@@ -340,6 +352,7 @@ __device__ void remove_one_vertex(GPU_Data& device_data, GPU_Graph& graph, Warp_
 __device__ void add_one_vertex(Vertex* vertices, Warp_Data1&, GPU_Graph& graph, GPU_Data& device_data, GPU_Cliques& device_cliques, int idx);
 __device__ void check_for_clique(Warp_Data1& warp_data, Vertex* vertices, GPU_Cliques& device_cliques, GPU_Data& device_data, int idx);
 __device__ void write_to_tasks(GPU_Data& device_data, Warp_Data1& warp_data, Vertex* vertices, int idx);
+__device__ void calculate_LU_bounds(Vertex* vertices, GPU_Data& device_data, Warp_Data1& warp_data, GPU_Graph& graph, int idx);
 
 __device__ void device_sort(Vertex* target, int size, int lane_idx);
 __device__ void sort_vert(Vertex& vertex1, Vertex& vertex2, int& result);
@@ -593,9 +606,11 @@ void allocate_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& ho
     chkerr(cudaMemset(device_data.maximal_expansion, false, sizeof(bool)));
     chkerr(cudaMemset(device_data.dumping_cliques, false, sizeof(bool)));
 
+    chkerr(cudaMalloc((void**)&device_data.minimum_degree_ratio, sizeof(double)));
     chkerr(cudaMalloc((void**)&device_data.minimum_degrees, sizeof(int) * (input_graph.number_of_vertices + 1)));
     chkerr(cudaMalloc((void**)&device_data.minimum_clique_size, sizeof(int)));
 
+    chkerr(cudaMemcpy(device_data.minimum_degree_ratio, &minimum_degree_ratio, sizeof(double), cudaMemcpyHostToDevice));
     chkerr(cudaMemcpy(device_data.minimum_degrees, minimum_degrees, sizeof(int) * (input_graph.number_of_vertices + 1), cudaMemcpyHostToDevice));
     chkerr(cudaMemcpy(device_data.minimum_clique_size, &minimum_clique_size, sizeof(int), cudaMemcpyHostToDevice));
 
@@ -1019,6 +1034,7 @@ void free_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& host_c
     chkerr(cudaFree(device_data.maximal_expansion));
     chkerr(cudaFree(device_data.dumping_cliques));
 
+    chkerr(cudaFree(device_data.minimum_degree_ratio));
     chkerr(cudaFree(device_data.minimum_degrees));
     chkerr(cudaFree(device_data.minimum_clique_size));
 
@@ -2167,6 +2183,9 @@ __device__ void add_one_vertex(Vertex* vertices, Warp_Data1& warp_data, GPU_Grap
     // DEGREE BASED PRUNING
     do 
     {
+        // TODO - CALCULATE LOWER UPPER BOUNDS
+        calculate_LU_bounds(vertices, device_data, warp_data, graph, idx); 
+
         // check for failed vertices
         failed_found = false;
         for (int k = (idx % WARP_SIZE); k < warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]; k+=WARP_SIZE) {
@@ -2308,6 +2327,182 @@ __device__ void write_to_tasks(GPU_Data& device_data, Warp_Data1& warp_data, Ver
     }
 }
 
+__device__ void calculate_LU_bounds(Vertex* vertices, GPU_Data& device_data, Warp_Data1& warp_data, GPU_Graph& graph, int idx)
+{
+    int index;
+    bool invalid_bounds;
+
+    int min_clq_indeg;
+    int min_indeg_exdeg;
+    int min_clq_totaldeg;
+    int sum_clq_indeg;
+
+    min_clq_indeg = vertices[0].indeg;
+    min_indeg_exdeg = vertices[0].exdeg;
+    min_clq_totaldeg = vertices[0].indeg + vertices[0].exdeg;
+    sum_clq_indeg = 0;
+
+    if ((idx % WARP_SIZE) == 0) {
+        warp_data.sum_candidate_indeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = 0;
+        warp_data.tightened_Upper_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = 0;
+
+        warp_data.min_clq_indeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = vertices[0].indeg;
+        warp_data.min_indeg_exdeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = vertices[0].exdeg;
+        warp_data.min_clq_totaldeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = vertices[0].indeg + vertices[0].exdeg;
+        warp_data.sum_clq_indeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = vertices[0].indeg;
+
+        warp_data.minimum_external_degree[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = device_get_mindeg(warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] + 1, 
+            device_data);
+    }
+    __syncwarp();
+
+    // each warp finds these values on their subsection of vertices
+    for (index = 1 + (idx % WARP_SIZE); index < warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]; index+=WARP_SIZE) {
+        sum_clq_indeg += vertices[index].indeg;
+
+        if (vertices[index].indeg < min_clq_indeg) {
+            min_clq_indeg = vertices[index].indeg;
+            min_indeg_exdeg = vertices[index].exdeg;
+        }
+        else if (vertices[index].indeg == min_clq_indeg) {
+            if (vertices[index].exdeg < min_indeg_exdeg) {
+                min_indeg_exdeg = vertices[index].exdeg;
+            }
+        }
+
+        if (vertices[index].indeg + vertices[index].exdeg < min_clq_totaldeg) {
+            min_clq_totaldeg = vertices[index].indeg + vertices[index].exdeg;
+        }
+    }
+    __syncwarp();
+
+    // first thread in warp handle the sum
+    if ((idx % WARP_SIZE) == 0) {
+        // get sum
+        for (int i = 1; i < 32; i *= 2) {
+            sum_clq_indeg += __shfl_xor_sync(0xFFFFFFFF, sum_clq_indeg, i);
+        }
+        // add to shared memory sum
+        warp_data.sum_clq_indeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] += sum_clq_indeg;
+    }
+    __syncwarp();
+
+    // CRITICAL SECTION - each lane then compares their values to the next to get a warp level value
+    for (int i = 0; i < WARP_SIZE; i++) {
+        if ((idx % WARP_SIZE) == i) {
+            if (min_clq_indeg < warp_data.min_clq_indeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]) {
+                warp_data.min_clq_indeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = min_clq_indeg;
+                warp_data.min_indeg_exdeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = min_indeg_exdeg;
+            }
+            else if (min_clq_indeg == warp_data.min_clq_indeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]) {
+                if (vertices[index].exdeg < warp_data.min_indeg_exdeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]) {
+                    warp_data.min_indeg_exdeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = min_indeg_exdeg;
+                }
+            }
+
+            if (min_clq_totaldeg < warp_data.min_clq_totaldeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]) {
+                warp_data.min_clq_totaldeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = min_clq_totaldeg;
+            }
+        }
+    }
+    __syncwarp();
+
+    if (warp_data.min_clq_indeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] < device_data.minimum_degrees[warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]])
+    {
+        // lower
+        if ((idx % WARP_SIZE) == 0) {
+            warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = device_get_mindeg(warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))], device_data) -
+                min_clq_indeg;
+
+            while (warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] <= warp_data.min_indeg_exdeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] && 
+                warp_data.min_clq_indeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] + warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] < 
+                device_data.minimum_degrees[warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] + warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]]) {
+                warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]++;
+            }
+
+            if (warp_data.min_clq_indeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] + warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] < 
+                device_data.minimum_degrees[warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] + warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]]) {
+                warp_data.Lower_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] + 1;
+                invalid_bounds = true;
+            }
+
+            // upper
+            warp_data.Upper_bound[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] = floor(warp_data.min_clq_totaldeg[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] / 
+                (*(device_data.minimum_degree_ratio))) + 1 - warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))];
+
+            // CURSOR
+
+            if (Upper_bound > number_of_new_candidates) {
+                Upper_bound = number_of_new_candidates;
+            }
+        }
+
+        // tighten
+        if (Lower_bound < Upper_bound) {
+            // tighten lower
+            for (index = 0; index < Lower_bound; index++) {
+                sum_candidate_indeg += new_vertices[number_of_new_vertices + index].indeg;
+            }
+
+            while (index < Upper_bound && sum_clq_indeg + sum_candidate_indeg < number_of_new_vertices * minimum_degrees[number_of_new_vertices + index]) {
+                sum_candidate_indeg += new_vertices[number_of_new_vertices + index].indeg;
+                index++;
+            }
+
+            if (sum_clq_indeg + sum_candidate_indeg < number_of_new_vertices * minimum_degrees[number_of_new_vertices + index]) {
+                Lower_bound = Upper_bound + 1;
+                invalid_bounds = true;
+            }
+            else {
+                Lower_bound = index;
+
+                tightened_Upper_bound = index;
+
+                while (index < Upper_bound) {
+                    sum_candidate_indeg += new_vertices[number_of_new_vertices + index].indeg;
+
+                    index++;
+
+                    if (sum_clq_indeg + sum_candidate_indeg >= number_of_new_vertices * minimum_degrees[number_of_new_vertices + index]) {
+                        tightened_Upper_bound = index;
+                    }
+                }
+
+                if (Upper_bound > tightened_Upper_bound) {
+                    Upper_bound = tightened_Upper_bound;
+                }
+
+                if (Lower_bound > 1) {
+                    minimum_external_degree = get_mindeg(number_of_new_vertices + Lower_bound);
+                }
+            }
+        }
+    }
+    else {
+        minimum_external_degree = get_mindeg(number_of_new_vertices + 1);
+
+        Upper_bound = number_of_new_candidates;
+
+        if (number_of_new_vertices < minimum_clique_size) {
+            Lower_bound = minimum_clique_size - number_of_new_vertices;
+        }
+        else {
+            Lower_bound = 0;
+        }
+    }
+
+    if (number_of_new_vertices + Upper_bound < minimum_clique_size) {
+        invalid_bounds = true;
+    }
+
+    if (Upper_bound < 0 || Upper_bound < Lower_bound) {
+        invalid_bounds = true;
+    }
+
+    if (invalid_bounds) {
+        break;
+    }
+}
 
 
 // --- HELPER KERNELS ---
