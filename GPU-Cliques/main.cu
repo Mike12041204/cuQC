@@ -23,7 +23,7 @@ using namespace std;
 
 // global memory size: 1.500.000.000 ints
 #define TASKS_SIZE 15000000
-#define EXPAND_THRESHOLD 9200
+#define EXPAND_THRESHOLD 3680
 #define BUFFER_SIZE 100000000
 #define BUFFER_OFFSET_SIZE 1000000
 #define CLIQUES_SIZE 50000000
@@ -40,7 +40,7 @@ using namespace std;
 // shared memory size: 12.300 ints
 #define VERTICES_SIZE 75
  
-#define BLOCK_SIZE 640
+#define BLOCK_SIZE 512
 #define NUM_OF_BLOCKS 22
 #define WARP_SIZE 32
 
