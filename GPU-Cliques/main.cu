@@ -1911,13 +1911,14 @@ __global__ void expand_level(GPU_Data device_data, GPU_Cliques device_cliques, G
             // update the exdeg and indeg of all vertices adj to the vertex just added to the vertex set
             pvertexid = vertices[warp_data.total_vertices[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] - 1].vertexid;
             for (int k = (idx % WARP_SIZE); k < warp_data.total_vertices[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]; k += WARP_SIZE) {
-                if (device_bsearch_array(graph.onehop_neighbors + graph.onehop_offsets[vertices[k].vertexid], graph.onehop_offsets[vertices[k].vertexid + 1] - graph.onehop_offsets[vertices[k].vertexid],
-                    pvertexid) != -1) {
+                if (device_bsearch_array(graph.onehop_neighbors + graph.onehop_offsets[vertices[k].vertexid], graph.onehop_offsets[vertices[k].vertexid + 1] - 
+                    graph.onehop_offsets[vertices[k].vertexid], pvertexid) != -1) {
                     vertices[k].exdeg--;
                     vertices[k].indeg++;
                 }
             }
             __syncwarp();
+
             // sort new vertices putting just added vertex at end of all vertices in x
             device_sort(vertices + warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] - 1, warp_data.number_of_candidates[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] + 1,
                 (idx % WARP_SIZE));
@@ -1937,7 +1938,6 @@ __global__ void expand_level(GPU_Data device_data, GPU_Cliques device_cliques, G
             device_sort(vertices + warp_data.number_of_members[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))], warp_data.number_of_candidates[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))],
                 (idx % WARP_SIZE));
 
-            // NOTE2 - dynamically select intersection technique depending on what is most efficient for parallel solving
             // update exdeg of vertices connected to removed cands
             if (warp_data.total_vertices[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] - number_of_removed_candidates > number_of_removed_candidates) {
                 for (int k = (idx % WARP_SIZE); k < warp_data.total_vertices[((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))] - number_of_removed_candidates; k += WARP_SIZE) {
