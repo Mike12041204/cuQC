@@ -174,18 +174,6 @@ class CPU_Graph
     }
 };
 
-// GPU GRAPH
-struct GPU_Graph
-{
-    int* number_of_vertices;
-    int* number_of_edges;
-
-    int* onehop_neighbors;
-    uint64_t* onehop_offsets;
-    int* twohop_neighbors;
-    uint64_t* twohop_offsets;
-};
-
 // CPU DATA
 struct CPU_Data
 {
@@ -317,15 +305,13 @@ struct Warp_Data
 };
 
 // METHODS
-void allocate_graph(GPU_Graph& device_graph, CPU_Graph& input_graph);
 void calculate_minimum_degrees(CPU_Graph& graph);
-void search(CPU_Graph& input_graph, ofstream& temp_results, GPU_Graph& device_graph);
+void search(CPU_Graph& input_graph, ofstream& temp_results);
 void allocate_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& host_cliques, GPU_Cliques& device_cliques, CPU_Graph& input_graph);
 void initialize_tasks(CPU_Graph& graph, CPU_Data& host_data);
 void move_to_gpu(CPU_Data& host_data, GPU_Data& device_data);
 void dump_cliques(CPU_Cliques& host_cliques, GPU_Cliques& device_cliques, ofstream& output_file);
 void free_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& host_cliques, GPU_Cliques& device_cliques);
-void free_graph(GPU_Graph& device_graph);
 void RemoveNonMax(char* szset_filename, char* szoutput_filename);
 
 int binary_search_array(int* search_array, int array_size, int search_number);
@@ -336,7 +322,7 @@ inline void chkerr(cudaError_t code);
 
 void print_CPU_Data(CPU_Data& host_data);
 void print_GPU_Data(GPU_Data& device_data);
-void print_GPU_Graph(GPU_Graph& device_graph, CPU_Graph& host_graph);
+void print_GPU_Graph(GPU_Data& device_data, CPU_Graph& host_graph);
 void print_WTask_Buffers(GPU_Data& device_data);
 void print_WClique_Buffers(GPU_Cliques& device_cliques);
 void print_GPU_Cliques(GPU_Cliques& device_cliques);
@@ -345,12 +331,12 @@ void print_Data_Sizes(GPU_Data& device_data, GPU_Cliques& device_cliques);
 void print_vertices(Vertex* vertices, int size);
 
 // KERNELS
-__global__ void expand_level(GPU_Data device_data, GPU_Cliques device_cliques, GPU_Graph graph);
+__global__ void expand_level(GPU_Data device_data, GPU_Cliques device_cliques);
 __global__ void transfer_buffers(GPU_Data device_data, GPU_Cliques device_cliques);
 __global__ void fill_from_buffer(GPU_Data device_data, GPU_Cliques device_cliques);
 __device__ void check_for_clique(Warp_Data& warp_data, GPU_Cliques& device_cliques, GPU_Data& device_data, Local_Data& local_data);
 __device__ void write_to_tasks(GPU_Data& device_data, Warp_Data& warp_data, Local_Data& local_data);
-__device__ void calculate_LU_bounds(GPU_Data& device_data, Warp_Data& warp_data, GPU_Graph& graph, Local_Data& local_data);
+__device__ void calculate_LU_bounds(GPU_Data& device_data, Warp_Data& warp_data, Local_Data& local_data);
 
 __device__ void device_sort(Vertex* target, int size, int lane_idx);
 __device__ void sort_vert(Vertex& vertex1, Vertex& vertex2, int& result);
@@ -403,17 +389,12 @@ int main(int argc, char* argv[])
     cout << ">:PRE-PROCESSING" << endl;
     CPU_Graph input_graph(graph_stream);
     graph_stream.close();
-    // BUG - free graph memory
-    GPU_Graph device_graph;
-    allocate_graph(device_graph, input_graph);
-    cudaDeviceSynchronize();
     calculate_minimum_degrees(input_graph);
     ofstream temp_results("temp.txt");
 
     // SEARCH
-    search(input_graph, temp_results, device_graph);
+    search(input_graph, temp_results);
 
-    free_graph(device_graph);
     temp_results.close();
 
     // RM NON-MAX
@@ -438,23 +419,6 @@ int main(int argc, char* argv[])
 
 // --- HOST METHODS --- 
 
-void allocate_graph(GPU_Graph& device_graph, CPU_Graph& input_graph)
-{
-    chkerr(cudaMalloc((void**)&device_graph.number_of_vertices, sizeof(int)));
-    chkerr(cudaMalloc((void**)&device_graph.number_of_edges, sizeof(int)));
-    chkerr(cudaMalloc((void**)&device_graph.onehop_neighbors, sizeof(int) * input_graph.number_of_onehop_neighbors));
-    chkerr(cudaMalloc((void**)&device_graph.onehop_offsets, sizeof(uint64_t) * (input_graph.number_of_vertices + 1)));
-    chkerr(cudaMalloc((void**)&device_graph.twohop_neighbors, sizeof(int) * input_graph.number_of_twohop_neighbors));
-    chkerr(cudaMalloc((void**)&device_graph.twohop_offsets, sizeof(uint64_t) * (input_graph.number_of_vertices + 1)));
-
-    chkerr(cudaMemcpy(device_graph.number_of_vertices, &(input_graph.number_of_vertices), sizeof(int), cudaMemcpyHostToDevice));
-    chkerr(cudaMemcpy(device_graph.number_of_edges, &(input_graph.number_of_edges), sizeof(int), cudaMemcpyHostToDevice));
-    chkerr(cudaMemcpy(device_graph.onehop_neighbors, input_graph.onehop_neighbors, sizeof(int) * input_graph.number_of_onehop_neighbors, cudaMemcpyHostToDevice));
-    chkerr(cudaMemcpy(device_graph.onehop_offsets, input_graph.onehop_offsets, sizeof(uint64_t) * (input_graph.number_of_vertices + 1), cudaMemcpyHostToDevice));
-    chkerr(cudaMemcpy(device_graph.twohop_neighbors, input_graph.twohop_neighbors, sizeof(int) * input_graph.number_of_twohop_neighbors, cudaMemcpyHostToDevice));
-    chkerr(cudaMemcpy(device_graph.twohop_offsets, input_graph.twohop_offsets, sizeof(uint64_t) * (input_graph.number_of_vertices + 1), cudaMemcpyHostToDevice));
-}
-
 // initializes minimum degrees array
 void calculate_minimum_degrees(CPU_Graph& graph)
 {
@@ -465,7 +429,7 @@ void calculate_minimum_degrees(CPU_Graph& graph)
     }
 }
 
-void search(CPU_Graph& input_graph, ofstream& temp_results, GPU_Graph& device_graph) 
+void search(CPU_Graph& input_graph, ofstream& temp_results) 
 {
     // DATA STRUCTURES
     CPU_Data host_data;
@@ -486,7 +450,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results, GPU_Graph& device_gr
     cudaDeviceSynchronize();
 
     // DEBUG
-    //print_GPU_Graph(device_graph, input_graph);
+    //print_GPU_Graph(device_data, input_graph);
     //print_CPU_Data(host_data);
     //print_GPU_Data(device_data);
 
@@ -499,7 +463,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results, GPU_Graph& device_gr
         chkerr(cudaMemset(device_data.dumping_cliques, false, sizeof(bool)));
         cudaDeviceSynchronize();
 
-        expand_level<<<NUM_OF_BLOCKS, BLOCK_SIZE >>>(device_data, device_cliques, device_graph);
+        expand_level<<<NUM_OF_BLOCKS, BLOCK_SIZE >>>(device_data, device_cliques);
         cudaDeviceSynchronize();
 
         // DEBUG
@@ -543,6 +507,21 @@ void search(CPU_Graph& input_graph, ofstream& temp_results, GPU_Graph& device_gr
 void allocate_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& host_cliques, GPU_Cliques& device_cliques, CPU_Graph& input_graph)
 {
     int number_of_warps = (NUM_OF_BLOCKS * BLOCK_SIZE) / WARP_SIZE;
+
+    // GPU GRAPH
+    chkerr(cudaMalloc((void**)&device_data.number_of_vertices, sizeof(int)));
+    chkerr(cudaMalloc((void**)&device_data.number_of_edges, sizeof(int)));
+    chkerr(cudaMalloc((void**)&device_data.onehop_neighbors, sizeof(int) * input_graph.number_of_onehop_neighbors));
+    chkerr(cudaMalloc((void**)&device_data.onehop_offsets, sizeof(uint64_t) * (input_graph.number_of_vertices + 1)));
+    chkerr(cudaMalloc((void**)&device_data.twohop_neighbors, sizeof(int) * input_graph.number_of_twohop_neighbors));
+    chkerr(cudaMalloc((void**)&device_data.twohop_offsets, sizeof(uint64_t) * (input_graph.number_of_vertices + 1)));
+
+    chkerr(cudaMemcpy(device_data.number_of_vertices, &(input_graph.number_of_vertices), sizeof(int), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(device_data.number_of_edges, &(input_graph.number_of_edges), sizeof(int), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(device_data.onehop_neighbors, input_graph.onehop_neighbors, sizeof(int) * input_graph.number_of_onehop_neighbors, cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(device_data.onehop_offsets, input_graph.onehop_offsets, sizeof(uint64_t) * (input_graph.number_of_vertices + 1), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(device_data.twohop_neighbors, input_graph.twohop_neighbors, sizeof(int) * input_graph.number_of_twohop_neighbors, cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(device_data.twohop_offsets, input_graph.twohop_offsets, sizeof(uint64_t) * (input_graph.number_of_vertices + 1), cudaMemcpyHostToDevice));
 
     // CPU DATA
     host_data.tasks1_count = new uint64_t;
@@ -1007,6 +986,14 @@ void dump_cliques(CPU_Cliques& host_cliques, GPU_Cliques& device_cliques, ofstre
 
 void free_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& host_cliques, GPU_Cliques& device_cliques)
 {
+    // GPU GRAPH
+    chkerr(cudaFree(device_data.number_of_vertices));
+    chkerr(cudaFree(device_data.number_of_edges));
+    chkerr(cudaFree(device_data.onehop_neighbors));
+    chkerr(cudaFree(device_data.onehop_offsets));
+    chkerr(cudaFree(device_data.twohop_neighbors));
+    chkerr(cudaFree(device_data.twohop_offsets));
+
     // CPU DATA
     delete host_data.tasks1_count;
     delete host_data.tasks1_offset;
@@ -1067,16 +1054,6 @@ void free_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& host_c
     chkerr(cudaFree(device_data.buffer_start));
     chkerr(cudaFree(device_data.cliques_offset_start));
     chkerr(cudaFree(device_data.cliques_start));
-}
-
-void free_graph(GPU_Graph& device_graph)
-{
-    chkerr(cudaFree(device_graph.number_of_vertices));
-    chkerr(cudaFree(device_graph.number_of_edges));
-    chkerr(cudaFree(device_graph.onehop_neighbors));
-    chkerr(cudaFree(device_graph.onehop_offsets));
-    chkerr(cudaFree(device_graph.twohop_neighbors));
-    chkerr(cudaFree(device_graph.twohop_offsets));
 }
 
 
@@ -1230,7 +1207,7 @@ inline void chkerr(cudaError_t code)
 
 // --- DEBUG METHODS ---
 
-void print_GPU_Graph(GPU_Graph& device_graph, CPU_Graph& host_graph)
+void print_GPU_Graph(GPU_Data& device_data, CPU_Graph& host_graph)
 {
     int* number_of_vertices = new int;
     int* number_of_edges = new int;
@@ -1240,12 +1217,12 @@ void print_GPU_Graph(GPU_Graph& device_graph, CPU_Graph& host_graph)
     int* twohop_neighbors = new int[host_graph.number_of_twohop_neighbors];
     uint64_t * twohop_offsets = new uint64_t[(host_graph.number_of_vertices)+1];
 
-    chkerr(cudaMemcpy(number_of_vertices, device_graph.number_of_vertices, sizeof(int), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(number_of_edges, device_graph.number_of_edges, sizeof(int), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(onehop_neighbors, device_graph.onehop_neighbors, sizeof(int)*host_graph.number_of_onehop_neighbors, cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(onehop_offsets, device_graph.onehop_offsets, sizeof(uint64_t)*(host_graph.number_of_vertices+1), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(twohop_neighbors, device_graph.twohop_neighbors, sizeof(int)*host_graph.number_of_twohop_neighbors, cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(twohop_offsets, device_graph.twohop_offsets, sizeof(uint64_t)*(host_graph.number_of_vertices+1), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(number_of_vertices, device_data.number_of_vertices, sizeof(int), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(number_of_edges, device_data.number_of_edges, sizeof(int), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(onehop_neighbors, device_data.onehop_neighbors, sizeof(int)*host_graph.number_of_onehop_neighbors, cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(onehop_offsets, device_data.onehop_offsets, sizeof(uint64_t)*(host_graph.number_of_vertices+1), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(twohop_neighbors, device_data.twohop_neighbors, sizeof(int)*host_graph.number_of_twohop_neighbors, cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(twohop_offsets, device_data.twohop_offsets, sizeof(uint64_t)*(host_graph.number_of_vertices+1), cudaMemcpyDeviceToHost));
 
     cout << endl << " --- (GPU_Graph)device_graph details --- " << endl;
     cout << endl << "|V|: " << (*number_of_vertices) << " |E|: " << (*number_of_edges) << endl;
@@ -1670,7 +1647,7 @@ void print_vertices(Vertex* vertices, int size)
 
 // --- DEVICE KERNELS ---
 
-__global__ void expand_level(GPU_Data device_data, GPU_Cliques device_cliques, GPU_Graph graph)
+__global__ void expand_level(GPU_Data device_data, GPU_Cliques device_cliques)
 {
     // data is stored in data structures to reduce the number of variables that need to be passed to methods
     __shared__ Warp_Data warp_data;
@@ -1766,12 +1743,12 @@ __global__ void expand_level(GPU_Data device_data, GPU_Cliques device_cliques, G
 
                 pvertexid = local_data.read_vertices[warp_data.start[local_data.warp_in_block_idx] + warp_data.tot_vert[local_data.warp_in_block_idx]].vertexid;
                 for (int k = (local_data.idx % WARP_SIZE); k < warp_data.tot_vert[local_data.warp_in_block_idx]; k += WARP_SIZE) {
-                    if (device_bsearch_array(graph.onehop_neighbors + graph.onehop_offsets[pvertexid], graph.onehop_offsets[pvertexid + 1] - graph.onehop_offsets[pvertexid],
+                    if (device_bsearch_array(device_data.onehop_neighbors + device_data.onehop_offsets[pvertexid], device_data.onehop_offsets[pvertexid + 1] - device_data.onehop_offsets[pvertexid],
                         local_data.read_vertices[warp_data.start[local_data.warp_in_block_idx] + k].vertexid) != -1) {
                         local_data.read_vertices[warp_data.start[local_data.warp_in_block_idx] + k].exdeg--;
                     }
 
-                    if (device_bsearch_array(graph.twohop_neighbors + graph.twohop_offsets[pvertexid], graph.twohop_offsets[pvertexid + 1] - graph.twohop_offsets[pvertexid],
+                    if (device_bsearch_array(device_data.twohop_neighbors + device_data.twohop_offsets[pvertexid], device_data.twohop_offsets[pvertexid + 1] - device_data.twohop_offsets[pvertexid],
                         local_data.read_vertices[warp_data.start[local_data.warp_in_block_idx] + k].vertexid) != -1) {
                         local_data.read_vertices[warp_data.start[local_data.warp_in_block_idx] + k].lvl2adj--;
                     }
@@ -1829,8 +1806,8 @@ __global__ void expand_level(GPU_Data device_data, GPU_Cliques device_cliques, G
             // update the exdeg and indeg of all vertices adj to the vertex just added to the vertex set
             pvertexid = local_data.vertices[warp_data.total_vertices[local_data.warp_in_block_idx] - 1].vertexid;
             for (int k = (local_data.idx % WARP_SIZE); k < warp_data.total_vertices[local_data.warp_in_block_idx]; k += WARP_SIZE) {
-                if (device_bsearch_array(graph.onehop_neighbors + graph.onehop_offsets[local_data.vertices[k].vertexid], graph.onehop_offsets[local_data.vertices[k].vertexid + 1] -
-                    graph.onehop_offsets[local_data.vertices[k].vertexid], pvertexid) != -1) {
+                if (device_bsearch_array(device_data.onehop_neighbors + device_data.onehop_offsets[local_data.vertices[k].vertexid], device_data.onehop_offsets[local_data.vertices[k].vertexid + 1] -
+                    device_data.onehop_offsets[local_data.vertices[k].vertexid], pvertexid) != -1) {
                     local_data.vertices[k].exdeg--;
                     local_data.vertices[k].indeg++;
                 }
@@ -1847,7 +1824,7 @@ __global__ void expand_level(GPU_Data device_data, GPU_Cliques device_cliques, G
             number_of_removed_candidates = 0;
             for (int k = warp_data.number_of_members[local_data.warp_in_block_idx] + (local_data.idx % WARP_SIZE); k < warp_data.total_vertices[local_data.warp_in_block_idx];
                 k += WARP_SIZE) {
-                if (device_bsearch_array(graph.twohop_neighbors + graph.twohop_offsets[pvertexid], graph.twohop_offsets[pvertexid + 1] - graph.twohop_offsets[pvertexid], local_data.vertices[k].vertexid) == -1) {
+                if (device_bsearch_array(device_data.twohop_neighbors + device_data.twohop_offsets[pvertexid], device_data.twohop_offsets[pvertexid + 1] - device_data.twohop_offsets[pvertexid], local_data.vertices[k].vertexid) == -1) {
                     local_data.vertices[k].label = -1;
                     number_of_removed_candidates++;
                 }
@@ -1864,13 +1841,13 @@ __global__ void expand_level(GPU_Data device_data, GPU_Cliques device_cliques, G
                     pvertexid = local_data.vertices[k].vertexid;
                     for (int l = warp_data.total_vertices[local_data.warp_in_block_idx] - number_of_removed_candidates; l <
                         warp_data.total_vertices[local_data.warp_in_block_idx]; l++) {
-                        if (device_bsearch_array(graph.onehop_neighbors + graph.onehop_offsets[local_data.vertices[l].vertexid], graph.onehop_offsets[local_data.vertices[l].vertexid + 1] -
-                            graph.onehop_offsets[local_data.vertices[l].vertexid], pvertexid) != -1) {
+                        if (device_bsearch_array(device_data.onehop_neighbors + device_data.onehop_offsets[local_data.vertices[l].vertexid], device_data.onehop_offsets[local_data.vertices[l].vertexid + 1] -
+                            device_data.onehop_offsets[local_data.vertices[l].vertexid], pvertexid) != -1) {
                             local_data.vertices[k].exdeg--;
                         }
 
-                        if (device_bsearch_array(graph.twohop_neighbors + graph.twohop_offsets[local_data.vertices[l].vertexid], graph.twohop_offsets[local_data.vertices[l].vertexid + 1] -
-                            graph.twohop_offsets[local_data.vertices[l].vertexid], pvertexid) != -1) {
+                        if (device_bsearch_array(device_data.twohop_neighbors + device_data.twohop_offsets[local_data.vertices[l].vertexid], device_data.twohop_offsets[local_data.vertices[l].vertexid + 1] -
+                            device_data.twohop_offsets[local_data.vertices[l].vertexid], pvertexid) != -1) {
                             local_data.vertices[k].lvl2adj--;
                         }
                     }
@@ -1882,13 +1859,13 @@ __global__ void expand_level(GPU_Data device_data, GPU_Cliques device_cliques, G
                     pvertexid = local_data.vertices[k].vertexid;
                     for (int l = warp_data.total_vertices[local_data.warp_in_block_idx] - number_of_removed_candidates + (local_data.idx % WARP_SIZE); l < warp_data.total_vertices[((local_data.idx / WARP_SIZE) %
                         (BLOCK_SIZE / WARP_SIZE))]; l += WARP_SIZE) {
-                        if (device_bsearch_array(graph.onehop_neighbors + graph.onehop_offsets[local_data.vertices[l].vertexid], graph.onehop_offsets[local_data.vertices[l].vertexid + 1] -
-                            graph.onehop_offsets[local_data.vertices[l].vertexid], pvertexid) != -1) {
+                        if (device_bsearch_array(device_data.onehop_neighbors + device_data.onehop_offsets[local_data.vertices[l].vertexid], device_data.onehop_offsets[local_data.vertices[l].vertexid + 1] -
+                            device_data.onehop_offsets[local_data.vertices[l].vertexid], pvertexid) != -1) {
                             local_data.vertices[k].exdeg--;
                         }
 
-                        if (device_bsearch_array(graph.twohop_neighbors + graph.twohop_offsets[local_data.vertices[l].vertexid], graph.twohop_offsets[local_data.vertices[l].vertexid + 1] -
-                            graph.twohop_offsets[local_data.vertices[l].vertexid], pvertexid) != -1) {
+                        if (device_bsearch_array(device_data.twohop_neighbors + device_data.twohop_offsets[local_data.vertices[l].vertexid], device_data.twohop_offsets[local_data.vertices[l].vertexid + 1] -
+                            device_data.twohop_offsets[local_data.vertices[l].vertexid], pvertexid) != -1) {
                             local_data.vertices[k].lvl2adj--;
                         }
                     }
@@ -1912,7 +1889,7 @@ __global__ void expand_level(GPU_Data device_data, GPU_Cliques device_cliques, G
             do
             {
                 // calculate lower and upper bounds for vertices
-                calculate_LU_bounds(device_data, warp_data, graph, local_data);
+                calculate_LU_bounds(device_data, warp_data, local_data);
 
                 if (warp_data.invalid_bounds[local_data.warp_in_block_idx]) {
                     break;
@@ -1953,13 +1930,13 @@ __global__ void expand_level(GPU_Data device_data, GPU_Cliques device_cliques, G
                         pvertexid = local_data.vertices[k].vertexid;
                         for (int l = warp_data.total_vertices[local_data.warp_in_block_idx] - number_of_removed_candidates; l < warp_data.total_vertices[((local_data.idx / WARP_SIZE) %
                             (BLOCK_SIZE / WARP_SIZE))]; l++) {
-                            if (device_bsearch_array(graph.onehop_neighbors + graph.onehop_offsets[local_data.vertices[l].vertexid], graph.onehop_offsets[local_data.vertices[l].vertexid + 1] -
-                                graph.onehop_offsets[local_data.vertices[l].vertexid], pvertexid) != -1) {
+                            if (device_bsearch_array(device_data.onehop_neighbors + device_data.onehop_offsets[local_data.vertices[l].vertexid], device_data.onehop_offsets[local_data.vertices[l].vertexid + 1] -
+                                device_data.onehop_offsets[local_data.vertices[l].vertexid], pvertexid) != -1) {
                                 local_data.vertices[k].exdeg--;
                             }
 
-                            if (device_bsearch_array(graph.twohop_neighbors + graph.twohop_offsets[local_data.vertices[l].vertexid], graph.twohop_offsets[local_data.vertices[l].vertexid + 1] -
-                                graph.twohop_offsets[local_data.vertices[l].vertexid], pvertexid) != -1) {
+                            if (device_bsearch_array(device_data.twohop_neighbors + device_data.twohop_offsets[local_data.vertices[l].vertexid], device_data.twohop_offsets[local_data.vertices[l].vertexid + 1] -
+                                device_data.twohop_offsets[local_data.vertices[l].vertexid], pvertexid) != -1) {
                                 local_data.vertices[k].lvl2adj--;
                             }
                         }
@@ -1971,13 +1948,13 @@ __global__ void expand_level(GPU_Data device_data, GPU_Cliques device_cliques, G
                         pvertexid = local_data.vertices[k].vertexid;
                         for (int l = warp_data.total_vertices[local_data.warp_in_block_idx] - number_of_removed_candidates + (local_data.idx % WARP_SIZE); l <
                             warp_data.total_vertices[local_data.warp_in_block_idx]; l += WARP_SIZE) {
-                            if (device_bsearch_array(graph.onehop_neighbors + graph.onehop_offsets[local_data.vertices[l].vertexid], graph.onehop_offsets[local_data.vertices[l].vertexid + 1] -
-                                graph.onehop_offsets[local_data.vertices[l].vertexid], pvertexid) != -1) {
+                            if (device_bsearch_array(device_data.onehop_neighbors + device_data.onehop_offsets[local_data.vertices[l].vertexid], device_data.onehop_offsets[local_data.vertices[l].vertexid + 1] -
+                                device_data.onehop_offsets[local_data.vertices[l].vertexid], pvertexid) != -1) {
                                 local_data.vertices[k].exdeg--;
                             }
 
-                            if (device_bsearch_array(graph.twohop_neighbors + graph.twohop_offsets[local_data.vertices[l].vertexid], graph.twohop_offsets[local_data.vertices[l].vertexid + 1] -
-                                graph.twohop_offsets[local_data.vertices[l].vertexid], pvertexid) != -1) {
+                            if (device_bsearch_array(device_data.twohop_neighbors + device_data.twohop_offsets[local_data.vertices[l].vertexid], device_data.twohop_offsets[local_data.vertices[l].vertexid + 1] -
+                                device_data.twohop_offsets[local_data.vertices[l].vertexid], pvertexid) != -1) {
                                 local_data.vertices[k].lvl2adj--;
                             }
                         }
@@ -2266,7 +2243,8 @@ __device__ void write_to_tasks(GPU_Data& device_data, Warp_Data& warp_data, Loca
     }
 }
 
-__device__ void calculate_LU_bounds(GPU_Data& device_data, Warp_Data& warp_data, GPU_Graph& graph, Local_Data& local_data)
+// TODO - try to parallelize as much calculation as possible
+__device__ void calculate_LU_bounds(GPU_Data& device_data, Warp_Data& warp_data, Local_Data& local_data)
 {
     int index;
 
