@@ -204,6 +204,7 @@ struct CPU_Data
 // GPU DATA
 struct GPU_Data
 {
+    // GPU DATA
     uint64_t* current_level;
 
     uint64_t* tasks1_count;
@@ -240,6 +241,15 @@ struct GPU_Data
 
     // DEBUG
     bool* debug;
+
+    // GPU GRAPH
+    int* number_of_vertices;
+    int* number_of_edges;
+
+    int* onehop_neighbors;
+    uint64_t* onehop_offsets;
+    int* twohop_neighbors;
+    uint64_t* twohop_offsets;
 };
 
 // CPU CLIQUES
@@ -318,10 +328,6 @@ void free_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& host_c
 void free_graph(GPU_Graph& device_graph);
 void RemoveNonMax(char* szset_filename, char* szoutput_filename);
 
-int linear_search_vertices(Vertex* search_array, int array_size, int search_vertexid);
-int binary_search_candidates(Vertex* search_array, int array_size, int search_vertexid);
-int binary_search_members(Vertex* search_array, int array_size, int search_vertexid);
-int linear_search_array(int* search_array, int array_size, int search_number);
 int binary_search_array(int* search_array, int array_size, int search_number);
 int sort_vertices(const void* a, const void* b);
 int get_mindeg(int clique_size);
@@ -814,7 +820,6 @@ void initialize_tasks(CPU_Graph& graph, CPU_Data& host_data)
             new_vertices[j].lvl2adj = old_vertices[j].lvl2adj;
         }
 
-        // TODO - this doesnt seem right
         // set all covered vertices from previous level as candidates
         for (int j = 0; j < number_of_covered_vertices; j++) {
             new_vertices[j].label = 0;
@@ -1078,90 +1083,7 @@ void free_graph(GPU_Graph& device_graph)
 
 // --- HELPER METHODS ---
 
-// searches an Vertex array for a vertex of a certain label, returns the position in the array that item was found, or -1 if not found
-int linear_search_vertices(Vertex* search_array, int array_size, int search_vertexid)
-{
-    // ALGO - linear
-    // TYPE - serial
-    // SPEED - O(n)
-
-    for (int i = 0; i < array_size; i++) {
-        if (search_array[i].vertexid == search_vertexid) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-int binary_search_candidates(Vertex* search_array, int array_size, int search_vertexid)
-{
-    // vertices in the clique are sorted from low to high (normal)
-
-    // ALGO - binary
-    // TYPE - serial
-    // SPEED - 0(log(n))
-
-    if (array_size <= 0) {
-        return -1;
-    }
-
-    if (search_array[array_size / 2].vertexid == search_vertexid) {
-        // Base case: Center element matches search number
-        return array_size / 2;
-    }
-    else if (search_array[array_size / 2].vertexid < search_vertexid) {
-        // Recursively search lower half
-        return binary_search_candidates(search_array, array_size / 2, search_vertexid);
-    }
-    else {
-        // Recursively search upper half
-        int upper_half_result = binary_search_candidates(search_array + array_size / 2 + 1, array_size - array_size / 2 - 1, search_vertexid);
-        return (upper_half_result != -1) ? (array_size / 2 + 1 + upper_half_result) : -1;
-    }
-}
-
-int binary_search_members(Vertex* search_array, int array_size, int search_vertexid)
-{
-    // vertices in the clique are sorted from low to high (normal)
-
-    // ALGO - binary
-    // TYPE - serial
-    // SPEED - 0(log(n))
-
-    if (array_size <= 0) {
-        return -1;
-    }
-
-    if (search_array[array_size / 2].vertexid == search_vertexid) {
-        // Base case: Center element matches search number
-        return array_size / 2;
-    }
-    else if (search_array[array_size / 2].vertexid > search_vertexid) {
-        // Recursively search lower half
-        return binary_search_members(search_array, array_size / 2, search_vertexid);
-    }
-    else {
-        // Recursively search upper half
-        int upper_half_result = binary_search_members(search_array + array_size / 2 + 1, array_size - array_size / 2 - 1, search_vertexid);
-        return (upper_half_result != -1) ? (array_size / 2 + 1 + upper_half_result) : -1;
-    }
-}
-
 // searches an int array for a certain int, returns the position in the array that item was found, or -1 if not found
-int linear_search_array(int* search_array, int array_size, int search_number)
-{
-    // ALGO - linear
-    // TYPE - serial
-    // SPEED - O(n)
-
-    for (int i = 0; i < array_size; i++) {
-        if (search_array[i] == search_number) {
-            return i;
-        }
-    }
-    return -1;
-}
-
 int binary_search_array(int* search_array, int array_size, int search_number)
 {
     // ALGO - binary
@@ -1306,7 +1228,7 @@ inline void chkerr(cudaError_t code)
 
 
 
-// DEBUG METHODS
+// --- DEBUG METHODS ---
 
 void print_GPU_Graph(GPU_Graph& device_graph, CPU_Graph& host_graph)
 {
