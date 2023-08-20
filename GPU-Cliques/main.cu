@@ -300,12 +300,6 @@ struct Local_Data
     int warp_in_block_idx;
 };
 
-struct Master_Data {
-    GPU_Data* device_data;
-    Warp_Data* warp_data;
-    Local_Data* local_data;
-};
-
 // METHODS
 void calculate_minimum_degrees(CPU_Graph& graph);
 void search(CPU_Graph& input_graph, ofstream& temp_results);
