@@ -44,8 +44,6 @@ using namespace std;
 #define NUM_OF_BLOCKS 22
 #define WARP_SIZE 32
 
-// TODO - consolodate data, clique, and graph data structures into a "global" data structure
-
 // VERTEX DATA
 struct Vertex
 {
@@ -189,7 +187,15 @@ struct CPU_Data
     bool* dumping_cliques;
 };
 
-// GPU DATA
+// CPU CLIQUES
+struct CPU_Cliques
+{
+    uint64_t* cliques_count;
+    uint64_t* cliques_offset;
+    int* cliques_vertex;
+};
+
+// DEVICE DATA
 struct GPU_Data
 {
     // GPU DATA
@@ -238,19 +244,8 @@ struct GPU_Data
     uint64_t* onehop_offsets;
     int* twohop_neighbors;
     uint64_t* twohop_offsets;
-};
 
-// CPU CLIQUES
-struct CPU_Cliques
-{
-    uint64_t* cliques_count;
-    uint64_t* cliques_offset;
-    int* cliques_vertex;
-};
-
-// GPU CLIQUES
-struct GPU_Cliques
-{
+    // GPU CLIQUES
     uint64_t* cliques_count;
     uint64_t* cliques_offset;
     int* cliques_vertex;
@@ -260,17 +255,6 @@ struct GPU_Cliques
     int* wcliques_vertex;
 
     int* total_cliques;
-};
-
-struct Local_Data
-{
-    Vertex* read_vertices;
-    uint64_t* read_offsets;
-    uint64_t* read_count;
-
-    Vertex* vertices;
-    int idx;
-    int warp_in_block_idx;
 };
 
 // WARP DATA
@@ -301,17 +285,29 @@ struct Warp_Data
     int sum_candidate_indeg[(BLOCK_SIZE / WARP_SIZE)];
 
     bool invalid_bounds[(BLOCK_SIZE / WARP_SIZE)];
-    bool failed_found[(BLOCK_SIZE / WARP_SIZE)] ;
+    bool failed_found[(BLOCK_SIZE / WARP_SIZE)];
+};
+
+// LOCAL DATA
+struct Local_Data
+{
+    Vertex* read_vertices;
+    uint64_t* read_offsets;
+    uint64_t* read_count;
+
+    Vertex* vertices;
+    int idx;
+    int warp_in_block_idx;
 };
 
 // METHODS
 void calculate_minimum_degrees(CPU_Graph& graph);
 void search(CPU_Graph& input_graph, ofstream& temp_results);
-void allocate_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& host_cliques, GPU_Cliques& device_cliques, CPU_Graph& input_graph);
+void allocate_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& host_cliques, CPU_Graph& input_graph);
 void initialize_tasks(CPU_Graph& graph, CPU_Data& host_data);
 void move_to_gpu(CPU_Data& host_data, GPU_Data& device_data);
-void dump_cliques(CPU_Cliques& host_cliques, GPU_Cliques& device_cliques, ofstream& output_file);
-void free_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& host_cliques, GPU_Cliques& device_cliques);
+void dump_cliques(CPU_Cliques& host_cliques, GPU_Data& device_data, ofstream& output_file);
+void free_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& host_cliques);
 void RemoveNonMax(char* szset_filename, char* szoutput_filename);
 
 int binary_search_array(int* search_array, int array_size, int search_number);
@@ -324,17 +320,17 @@ void print_CPU_Data(CPU_Data& host_data);
 void print_GPU_Data(GPU_Data& device_data);
 void print_GPU_Graph(GPU_Data& device_data, CPU_Graph& host_graph);
 void print_WTask_Buffers(GPU_Data& device_data);
-void print_WClique_Buffers(GPU_Cliques& device_cliques);
-void print_GPU_Cliques(GPU_Cliques& device_cliques);
+void print_WClique_Buffers(GPU_Data& device_data);
+void print_GPU_Cliques(GPU_Data& device_data);
 void print_CPU_Cliques(CPU_Cliques& host_cliques);
-void print_Data_Sizes(GPU_Data& device_data, GPU_Cliques& device_cliques);
+void print_Data_Sizes(GPU_Data& device_data);
 void print_vertices(Vertex* vertices, int size);
 
 // KERNELS
-__global__ void expand_level(GPU_Data device_data, GPU_Cliques device_cliques);
-__global__ void transfer_buffers(GPU_Data device_data, GPU_Cliques device_cliques);
-__global__ void fill_from_buffer(GPU_Data device_data, GPU_Cliques device_cliques);
-__device__ void check_for_clique(Warp_Data& warp_data, GPU_Cliques& device_cliques, GPU_Data& device_data, Local_Data& local_data);
+__global__ void expand_level(GPU_Data device_data);
+__global__ void transfer_buffers(GPU_Data device_data);
+__global__ void fill_from_buffer(GPU_Data device_data);
+__device__ void check_for_clique(GPU_Data& device_data, Warp_Data& warp_data, Local_Data& local_data);
 __device__ void write_to_tasks(GPU_Data& device_data, Warp_Data& warp_data, Local_Data& local_data);
 __device__ void calculate_LU_bounds(GPU_Data& device_data, Warp_Data& warp_data, Local_Data& local_data);
 
@@ -433,12 +429,11 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
 {
     // DATA STRUCTURES
     CPU_Data host_data;
-    GPU_Data device_data;
     CPU_Cliques host_cliques;
-    GPU_Cliques device_cliques;
+    GPU_Data device_data;
 
     // HANDLE MEMORY
-    allocate_memory(host_data, device_data, host_cliques, device_cliques, input_graph);
+    allocate_memory(host_data, device_data, host_cliques, input_graph);
     cudaDeviceSynchronize();
 
     // INITIALIZE TASKS
@@ -463,17 +458,17 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
         chkerr(cudaMemset(device_data.dumping_cliques, false, sizeof(bool)));
         cudaDeviceSynchronize();
 
-        expand_level<<<NUM_OF_BLOCKS, BLOCK_SIZE >>>(device_data, device_cliques);
+        expand_level<<<NUM_OF_BLOCKS, BLOCK_SIZE >>>(device_data);
         cudaDeviceSynchronize();
 
         // DEBUG
         //print_WClique_Buffers(device_cliques);
         //print_WTask_Buffers(device_data);
 
-        transfer_buffers<<<NUM_OF_BLOCKS, BLOCK_SIZE>>>(device_data, device_cliques);
+        transfer_buffers<<<NUM_OF_BLOCKS, BLOCK_SIZE>>>(device_data);
         cudaDeviceSynchronize();
 
-        fill_from_buffer<<<NUM_OF_BLOCKS, BLOCK_SIZE>>>(device_data, device_cliques);
+        fill_from_buffer<<<NUM_OF_BLOCKS, BLOCK_SIZE>>>(device_data);
         cudaDeviceSynchronize();
 
         chkerr(cudaMemcpy(host_data.maximal_expansion, device_data.maximal_expansion, sizeof(bool), cudaMemcpyDeviceToHost));
@@ -482,7 +477,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
         cudaDeviceSynchronize();
 
         if (*host_data.dumping_cliques) {
-            dump_cliques(host_cliques, device_cliques, temp_results);
+            dump_cliques(host_cliques, device_data, temp_results);
         }
 
         // DEBUG
@@ -497,14 +492,14 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
         //chkerr(cudaMemset(device_data.debug, false, sizeof(bool)));
     }
 
-    dump_cliques(host_cliques, device_cliques, temp_results);
+    dump_cliques(host_cliques, device_data, temp_results);
 
     // FREE MEMORY
-    free_memory(host_data, device_data, host_cliques, device_cliques);
+    free_memory(host_data, device_data, host_cliques);
 }
 
 // allocates memory for the data structures on the host and device
-void allocate_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& host_cliques, GPU_Cliques& device_cliques, CPU_Graph& input_graph)
+void allocate_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& host_cliques, CPU_Graph& input_graph)
 {
     int number_of_warps = (NUM_OF_BLOCKS * BLOCK_SIZE) / WARP_SIZE;
 
@@ -607,23 +602,23 @@ void allocate_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& ho
     (*(host_cliques.cliques_count)) = 0;
 
     // GPU CLIQUES
-    chkerr(cudaMalloc((void**)&device_cliques.cliques_count, sizeof(uint64_t)));
-    chkerr(cudaMalloc((void**)&device_cliques.cliques_vertex, sizeof(int) * CLIQUES_SIZE));
-    chkerr(cudaMalloc((void**)&device_cliques.cliques_offset, sizeof(uint64_t) * CLIQUES_OFFSET_SIZE));
+    chkerr(cudaMalloc((void**)&device_data.cliques_count, sizeof(uint64_t)));
+    chkerr(cudaMalloc((void**)&device_data.cliques_vertex, sizeof(int) * CLIQUES_SIZE));
+    chkerr(cudaMalloc((void**)&device_data.cliques_offset, sizeof(uint64_t) * CLIQUES_OFFSET_SIZE));
 
-    chkerr(cudaMemset(device_cliques.cliques_offset, 0, sizeof(uint64_t)));
-    chkerr(cudaMemset(device_cliques.cliques_count, 0, sizeof(uint64_t)));
+    chkerr(cudaMemset(device_data.cliques_offset, 0, sizeof(uint64_t)));
+    chkerr(cudaMemset(device_data.cliques_count, 0, sizeof(uint64_t)));
 
-    chkerr(cudaMalloc((void**)&device_cliques.wcliques_count, sizeof(uint64_t) * number_of_warps));
-    chkerr(cudaMalloc((void**)&device_cliques.wcliques_offset, (sizeof(uint64_t)* WCLIQUES_OFFSET_SIZE)* number_of_warps));
-    chkerr(cudaMalloc((void**)&device_cliques.wcliques_vertex, (sizeof(int) * WCLIQUES_SIZE) * number_of_warps));
+    chkerr(cudaMalloc((void**)&device_data.wcliques_count, sizeof(uint64_t) * number_of_warps));
+    chkerr(cudaMalloc((void**)&device_data.wcliques_offset, (sizeof(uint64_t)* WCLIQUES_OFFSET_SIZE)* number_of_warps));
+    chkerr(cudaMalloc((void**)&device_data.wcliques_vertex, (sizeof(int) * WCLIQUES_SIZE) * number_of_warps));
 
-    chkerr(cudaMemset(device_cliques.wcliques_offset, 0, (sizeof(uint64_t)* WCLIQUES_OFFSET_SIZE)* number_of_warps));
-    chkerr(cudaMemset(device_cliques.wcliques_count, 0, sizeof(uint64_t)* number_of_warps));
+    chkerr(cudaMemset(device_data.wcliques_offset, 0, (sizeof(uint64_t)* WCLIQUES_OFFSET_SIZE)* number_of_warps));
+    chkerr(cudaMemset(device_data.wcliques_count, 0, sizeof(uint64_t)* number_of_warps));
 
-    chkerr(cudaMalloc((void**)&device_cliques.total_cliques, sizeof(int)));
+    chkerr(cudaMalloc((void**)&device_data.total_cliques, sizeof(int)));
 
-    chkerr(cudaMemset(device_cliques.total_cliques, 0, sizeof(int)));
+    chkerr(cudaMemset(device_data.total_cliques, 0, sizeof(int)));
 
     chkerr(cudaMalloc((void**)&device_data.buffer_offset_start, sizeof(uint64_t)));
     chkerr(cudaMalloc((void**)&device_data.buffer_start, sizeof(uint64_t)));
@@ -960,12 +955,12 @@ void move_to_gpu(CPU_Data& host_data, GPU_Data& device_data)
     cudaMemcpy(device_data.buffer_vertices, host_data.buffer_vertices, (BUFFER_SIZE) * sizeof(int), cudaMemcpyHostToDevice);
 }
 
-void dump_cliques(CPU_Cliques& host_cliques, GPU_Cliques& device_cliques, ofstream& temp_results)
+void dump_cliques(CPU_Cliques& host_cliques, GPU_Data& device_data, ofstream& temp_results)
 {
     // gpu cliques to cpu cliques
-    chkerr(cudaMemcpy(host_cliques.cliques_count, device_cliques.cliques_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(host_cliques.cliques_offset, device_cliques.cliques_offset, sizeof(uint64_t) * CLIQUES_OFFSET_SIZE, cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(host_cliques.cliques_vertex, device_cliques.cliques_vertex, sizeof(int) * CLIQUES_SIZE, cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(host_cliques.cliques_count, device_data.cliques_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(host_cliques.cliques_offset, device_data.cliques_offset, sizeof(uint64_t) * CLIQUES_OFFSET_SIZE, cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(host_cliques.cliques_vertex, device_data.cliques_vertex, sizeof(int) * CLIQUES_SIZE, cudaMemcpyDeviceToHost));
     cudaDeviceSynchronize();
 
     // DEBUG
@@ -981,10 +976,10 @@ void dump_cliques(CPU_Cliques& host_cliques, GPU_Cliques& device_cliques, ofstre
         temp_results << "\n";
     }
     ((*host_cliques.cliques_count)) = 0;
-    cudaMemset(device_cliques.cliques_count, 0, sizeof(uint64_t));
+    cudaMemset(device_data.cliques_count, 0, sizeof(uint64_t));
 }
 
-void free_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& host_cliques, GPU_Cliques& device_cliques)
+void free_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& host_cliques)
 {
     // GPU GRAPH
     chkerr(cudaFree(device_data.number_of_vertices));
@@ -1042,13 +1037,13 @@ void free_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& host_c
     delete host_cliques.cliques_offset;
 
     // GPU CLIQUES
-    chkerr(cudaFree(device_cliques.cliques_count));
-    chkerr(cudaFree(device_cliques.cliques_vertex));
-    chkerr(cudaFree(device_cliques.cliques_offset));
+    chkerr(cudaFree(device_data.cliques_count));
+    chkerr(cudaFree(device_data.cliques_vertex));
+    chkerr(cudaFree(device_data.cliques_offset));
 
-    chkerr(cudaFree(device_cliques.wcliques_count));
-    chkerr(cudaFree(device_cliques.wcliques_vertex));
-    chkerr(cudaFree(device_cliques.wcliques_offset));
+    chkerr(cudaFree(device_data.wcliques_count));
+    chkerr(cudaFree(device_data.wcliques_vertex));
+    chkerr(cudaFree(device_data.wcliques_offset));
 
     chkerr(cudaFree(device_data.buffer_offset_start));
     chkerr(cudaFree(device_data.buffer_start));
@@ -1439,7 +1434,7 @@ void print_GPU_Data(GPU_Data& device_data)
     delete buffer_vertices;
 }
 
-void print_Data_Sizes(GPU_Data& device_data, GPU_Cliques& device_cliques)
+void print_Data_Sizes(GPU_Data& device_data)
 {
     uint64_t* current_level = new uint64_t;
     uint64_t* tasks1_count = new uint64_t;
@@ -1455,11 +1450,11 @@ void print_Data_Sizes(GPU_Data& device_data, GPU_Cliques& device_cliques)
     chkerr(cudaMemcpy(tasks1_count, device_data.tasks1_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
     chkerr(cudaMemcpy(tasks2_count, device_data.tasks2_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
     chkerr(cudaMemcpy(buffer_count, device_data.buffer_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(cliques_count, device_cliques.cliques_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(cliques_count, device_data.cliques_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
     chkerr(cudaMemcpy(tasks1_size, device_data.tasks1_offset + (*tasks1_count), sizeof(uint64_t), cudaMemcpyDeviceToHost));
     chkerr(cudaMemcpy(tasks2_size, device_data.tasks2_offset + (*tasks2_count), sizeof(uint64_t), cudaMemcpyDeviceToHost));
     chkerr(cudaMemcpy(buffer_size, device_data.buffer_offset + (*buffer_count), sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(cliques_size, device_cliques.cliques_offset + (*cliques_count), sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(cliques_size, device_data.cliques_offset + (*cliques_count), sizeof(uint64_t), cudaMemcpyDeviceToHost));
 
     cout << "L: " << (*current_level) << " T1: " << (*tasks1_count) << " " << (*tasks1_size) << " T2: " << (*tasks2_count) << " " << (*tasks2_size) << " B: " << (*buffer_count) << " " << (*buffer_size) << " C: " << (*cliques_count) << " " << (*cliques_size) << endl;
 
@@ -1527,16 +1522,16 @@ void print_WTask_Buffers(GPU_Data& device_data)
     delete wtasks_vertices;
 }
 
-void print_WClique_Buffers(GPU_Cliques& device_cliques)
+void print_WClique_Buffers(GPU_Data& device_data)
 {
     int warp_count = (NUM_OF_BLOCKS * BLOCK_SIZE) / 32;
     uint64_t* wcliques_count = new uint64_t[warp_count];
     uint64_t* wcliques_offset = new uint64_t[warp_count * WCLIQUES_OFFSET_SIZE];
     int* wcliques_vertex = new int[warp_count * WCLIQUES_SIZE];
 
-    chkerr(cudaMemcpy(wcliques_count, device_cliques.wcliques_count, sizeof(uint64_t) * warp_count, cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(wcliques_offset, device_cliques.wcliques_offset, sizeof(uint64_t) * (warp_count * WTASKS_OFFSET_SIZE), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(wcliques_vertex, device_cliques.wcliques_vertex, sizeof(int) * (warp_count * WTASKS_SIZE), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(wcliques_count, device_data.wcliques_count, sizeof(uint64_t) * warp_count, cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(wcliques_offset, device_data.wcliques_offset, sizeof(uint64_t) * (warp_count * WTASKS_OFFSET_SIZE), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(wcliques_vertex, device_data.wcliques_vertex, sizeof(int) * (warp_count * WTASKS_SIZE), cudaMemcpyDeviceToHost));
 
     cout << endl << " --- Warp Clique Buffers details --- " << endl;
     for (int i = 0; i < warp_count; i++) {
@@ -1560,15 +1555,15 @@ void print_WClique_Buffers(GPU_Cliques& device_cliques)
     delete wcliques_vertex;
 }
 
-void print_GPU_Cliques(GPU_Cliques& device_cliques)
+void print_GPU_Cliques(GPU_Data& device_data)
 {
     uint64_t* cliques_count = new uint64_t;
     uint64_t* cliques_offset = new uint64_t[CLIQUES_OFFSET_SIZE];
     int* cliques_vertex = new int[CLIQUES_SIZE];
 
-    chkerr(cudaMemcpy(cliques_count, device_cliques.cliques_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(cliques_offset, device_cliques.cliques_offset, sizeof(uint64_t) * CLIQUES_OFFSET_SIZE, cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(cliques_vertex, device_cliques.cliques_vertex, sizeof(int) * CLIQUES_SIZE, cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(cliques_count, device_data.cliques_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(cliques_offset, device_data.cliques_offset, sizeof(uint64_t) * CLIQUES_OFFSET_SIZE, cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(cliques_vertex, device_data.cliques_vertex, sizeof(int) * CLIQUES_SIZE, cudaMemcpyDeviceToHost));
 
     cout << endl << " --- (GPU_Cliques)device_cliques details --- " << endl;
     cout << endl << "Cliques: " << "Size: " << (*cliques_count) << endl;
@@ -1647,7 +1642,7 @@ void print_vertices(Vertex* vertices, int size)
 
 // --- DEVICE KERNELS ---
 
-__global__ void expand_level(GPU_Data device_data, GPU_Cliques device_cliques)
+__global__ void expand_level(GPU_Data device_data)
 {
     // data is stored in data structures to reduce the number of variables that need to be passed to methods
     __shared__ Warp_Data warp_data;
@@ -1712,14 +1707,14 @@ __global__ void expand_level(GPU_Data device_data, GPU_Cliques device_cliques)
 
         if (lookahead_sucess) {
             // write to cliques
-            uint64_t start_write = (WCLIQUES_SIZE * (local_data.idx / WARP_SIZE)) + device_cliques.wcliques_offset[(WCLIQUES_OFFSET_SIZE * (local_data.idx / WARP_SIZE)) +
-                (device_cliques.wcliques_count[(local_data.idx / WARP_SIZE)])];
+            uint64_t start_write = (WCLIQUES_SIZE * (local_data.idx / WARP_SIZE)) + device_data.wcliques_offset[(WCLIQUES_OFFSET_SIZE * (local_data.idx / WARP_SIZE)) +
+                (device_data.wcliques_count[(local_data.idx / WARP_SIZE)])];
             for (int j = (local_data.idx % WARP_SIZE); j < warp_data.tot_vert[local_data.warp_in_block_idx]; j += WARP_SIZE) {
-                device_cliques.wcliques_vertex[start_write + j] = local_data.read_vertices[warp_data.start[local_data.warp_in_block_idx] + j].vertexid;
+                device_data.wcliques_vertex[start_write + j] = local_data.read_vertices[warp_data.start[local_data.warp_in_block_idx] + j].vertexid;
             }
             if ((local_data.idx % WARP_SIZE) == 0) {
-                (device_cliques.wcliques_count[(local_data.idx / WARP_SIZE)])++;
-                device_cliques.wcliques_offset[(WCLIQUES_OFFSET_SIZE * (local_data.idx / WARP_SIZE)) + (device_cliques.wcliques_count[(local_data.idx / WARP_SIZE)])] = start_write - (WCLIQUES_SIZE * (local_data.idx / WARP_SIZE)) +
+                (device_data.wcliques_count[(local_data.idx / WARP_SIZE)])++;
+                device_data.wcliques_offset[(WCLIQUES_OFFSET_SIZE * (local_data.idx / WARP_SIZE)) + (device_data.wcliques_count[(local_data.idx / WARP_SIZE)])] = start_write - (WCLIQUES_SIZE * (local_data.idx / WARP_SIZE)) +
                     warp_data.tot_vert[local_data.warp_in_block_idx];
             }
             continue;
@@ -1977,9 +1972,10 @@ __global__ void expand_level(GPU_Data device_data, GPU_Cliques device_cliques)
 
             // HANDLE CLIQUES
             if (warp_data.number_of_members[local_data.warp_in_block_idx] >= (*device_data.minimum_clique_size)) {
-                check_for_clique(warp_data, device_cliques, device_data, local_data);
+                check_for_clique(device_data, warp_data, local_data);
             }
 
+            // TODO - test if we need to check vertex sets that have invalid bounds, dont think so
             // if vertex in x found as not extendable continue to next iteration
             if (failed_found || warp_data.invalid_bounds[local_data.warp_in_block_idx]) {
                 continue;
@@ -1999,18 +1995,18 @@ __global__ void expand_level(GPU_Data device_data, GPU_Cliques device_cliques)
     if ((local_data.idx % WARP_SIZE) == 0) {
         // sum to find tasks count
         atomicAdd(device_data.total_tasks, device_data.wtasks_count[(local_data.idx / WARP_SIZE)]);
-        atomicAdd(device_cliques.total_cliques, device_cliques.wcliques_count[(local_data.idx / WARP_SIZE)]);
+        atomicAdd(device_data.total_cliques, device_data.wcliques_count[(local_data.idx / WARP_SIZE)]);
     }
 
     if (local_data.idx == 0) {
         (*(device_data.buffer_offset_start)) = (*(device_data.buffer_count)) + 1;
         (*(device_data.buffer_start)) = device_data.buffer_offset[(*(device_data.buffer_count))];
-        (*(device_data.cliques_offset_start)) = (*(device_cliques.cliques_count)) + 1;
-        (*(device_data.cliques_start)) = device_cliques.cliques_offset[(*(device_cliques.cliques_count))];
+        (*(device_data.cliques_offset_start)) = (*(device_data.cliques_count)) + 1;
+        (*(device_data.cliques_start)) = device_data.cliques_offset[(*(device_data.cliques_count))];
     }
 }
 
-__global__ void transfer_buffers(GPU_Data device_data, GPU_Cliques device_cliques)
+__global__ void transfer_buffers(GPU_Data device_data)
 {
     // THREAD INFO
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -2071,8 +2067,8 @@ __global__ void transfer_buffers(GPU_Data device_data, GPU_Cliques device_clique
             tasks_offset_write[warp_in_block_idx] += device_data.wtasks_count[i];
             tasks_write[warp_in_block_idx] += device_data.wtasks_offset[(WTASKS_OFFSET_SIZE * i) + device_data.wtasks_count[i]];
 
-            cliques_offset_write[warp_in_block_idx] += device_cliques.wcliques_count[i];
-            cliques_write[warp_in_block_idx] += device_cliques.wcliques_offset[(WCLIQUES_OFFSET_SIZE * i) + device_cliques.wcliques_count[i]];
+            cliques_offset_write[warp_in_block_idx] += device_data.wcliques_count[i];
+            cliques_write[warp_in_block_idx] += device_data.wcliques_offset[(WCLIQUES_OFFSET_SIZE * i) + device_data.wcliques_count[i]];
         }
     }
 
@@ -2104,12 +2100,12 @@ __global__ void transfer_buffers(GPU_Data device_data, GPU_Cliques device_clique
     }
 
     //move to cliques
-    for (int i = (idx % WARP_SIZE) + 1; i <= device_cliques.wcliques_count[(idx / WARP_SIZE)]; i += WARP_SIZE) {
-        device_cliques.cliques_offset[(*(device_data.cliques_offset_start)) + cliques_offset_write[warp_in_block_idx] + i - 2] = 
-            device_cliques.wcliques_offset[(WCLIQUES_OFFSET_SIZE * (idx / WARP_SIZE)) + i] + (*(device_data.cliques_start)) + cliques_write[warp_in_block_idx];
+    for (int i = (idx % WARP_SIZE) + 1; i <= device_data.wcliques_count[(idx / WARP_SIZE)]; i += WARP_SIZE) {
+        device_data.cliques_offset[(*(device_data.cliques_offset_start)) + cliques_offset_write[warp_in_block_idx] + i - 2] = 
+            device_data.wcliques_offset[(WCLIQUES_OFFSET_SIZE * (idx / WARP_SIZE)) + i] + (*(device_data.cliques_start)) + cliques_write[warp_in_block_idx];
     }
-    for (int i = (idx % WARP_SIZE); i < device_cliques.wcliques_offset[(WCLIQUES_OFFSET_SIZE * (idx / WARP_SIZE)) + device_cliques.wcliques_count[(idx / WARP_SIZE)]]; i += WARP_SIZE) {
-        device_cliques.cliques_vertex[(*(device_data.cliques_start)) + cliques_write[warp_in_block_idx] + i] = device_cliques.wcliques_vertex[(WCLIQUES_SIZE * 
+    for (int i = (idx % WARP_SIZE); i < device_data.wcliques_offset[(WCLIQUES_OFFSET_SIZE * (idx / WARP_SIZE)) + device_data.wcliques_count[(idx / WARP_SIZE)]]; i += WARP_SIZE) {
+        device_data.cliques_vertex[(*(device_data.cliques_start)) + cliques_write[warp_in_block_idx] + i] = device_data.wcliques_vertex[(WCLIQUES_SIZE * 
             (idx / WARP_SIZE)) + i];
     }
 
@@ -2122,10 +2118,10 @@ __global__ void transfer_buffers(GPU_Data device_data, GPU_Cliques device_clique
             (*write_count) = EXPAND_THRESHOLD;
             (*(device_data.buffer_count)) += ((*(device_data.total_tasks)) - EXPAND_THRESHOLD);
         }
-        (*(device_cliques.cliques_count)) += (*(device_cliques.total_cliques));
+        (*(device_data.cliques_count)) += (*(device_data.total_cliques));
 
         (*(device_data.total_tasks)) = 0;
-        (*(device_cliques.total_cliques)) = 0;
+        (*(device_data.total_cliques)) = 0;
     }
 
     // HANDLE CLIQUES
@@ -2135,7 +2131,7 @@ __global__ void transfer_buffers(GPU_Data device_data, GPU_Cliques device_clique
     }
 }
 
-__global__ void fill_from_buffer(GPU_Data device_data, GPU_Cliques device_cliques)
+__global__ void fill_from_buffer(GPU_Data device_data)
 {
     // THREAD INFO
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -2158,7 +2154,7 @@ __global__ void fill_from_buffer(GPU_Data device_data, GPU_Cliques device_clique
 
     if (lane_idx == 0) {
         device_data.wtasks_count[warp_idx] = 0;
-        device_cliques.wcliques_count[warp_idx] = 0;
+        device_data.wcliques_count[warp_idx] = 0;
     }
 
     // FILL TASKS FROM BUFFER
@@ -2195,7 +2191,7 @@ __global__ void fill_from_buffer(GPU_Data device_data, GPU_Cliques device_clique
     }
 }
 
-__device__ void check_for_clique(Warp_Data& warp_data, GPU_Cliques& device_cliques, GPU_Data& device_data, Local_Data& local_data)
+__device__ void check_for_clique(GPU_Data& device_data, Warp_Data& warp_data, Local_Data& local_data)
 {
     bool clique = true;
 
@@ -2210,13 +2206,13 @@ __device__ void check_for_clique(Warp_Data& warp_data, GPU_Cliques& device_cliqu
 
     // if clique write to warp buffer for cliques
     if (clique) {
-        uint64_t start_write = (WCLIQUES_SIZE * (local_data.idx / WARP_SIZE)) + device_cliques.wcliques_offset[(WCLIQUES_OFFSET_SIZE * (local_data.idx / WARP_SIZE)) + (device_cliques.wcliques_count[(local_data.idx / WARP_SIZE)])];
+        uint64_t start_write = (WCLIQUES_SIZE * (local_data.idx / WARP_SIZE)) + device_data.wcliques_offset[(WCLIQUES_OFFSET_SIZE * (local_data.idx / WARP_SIZE)) + (device_data.wcliques_count[(local_data.idx / WARP_SIZE)])];
         for (int k = (local_data.idx % WARP_SIZE); k < warp_data.number_of_members[((local_data.idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]; k += WARP_SIZE) {
-            device_cliques.wcliques_vertex[start_write + k] = local_data.vertices[k].vertexid;
+            device_data.wcliques_vertex[start_write + k] = local_data.vertices[k].vertexid;
         }
         if ((local_data.idx % WARP_SIZE) == 0) {
-            (device_cliques.wcliques_count[(local_data.idx / WARP_SIZE)])++;
-            device_cliques.wcliques_offset[(WCLIQUES_OFFSET_SIZE * (local_data.idx / WARP_SIZE)) + (device_cliques.wcliques_count[(local_data.idx / WARP_SIZE)])] = start_write - (WCLIQUES_SIZE * (local_data.idx / WARP_SIZE)) +
+            (device_data.wcliques_count[(local_data.idx / WARP_SIZE)])++;
+            device_data.wcliques_offset[(WCLIQUES_OFFSET_SIZE * (local_data.idx / WARP_SIZE)) + (device_data.wcliques_count[(local_data.idx / WARP_SIZE)])] = start_write - (WCLIQUES_SIZE * (local_data.idx / WARP_SIZE)) +
                 warp_data.number_of_members[((local_data.idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))];
         }
     }
