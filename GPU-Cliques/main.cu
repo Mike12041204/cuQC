@@ -631,7 +631,7 @@ void allocate_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& ho
     chkerr(cudaMemset(device_data.debug, false, sizeof(bool)));
 }
 
-// TODO - add ALL pruning techniques, important for the largest graphs
+// processes 0th and 1st level of expansion
 void initialize_tasks(CPU_Graph& graph, CPU_Data& host_data)
 {
     // intersection
