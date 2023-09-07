@@ -23,7 +23,7 @@ using namespace std;
 
 // global memory size: 1.500.000.000 ints
 #define TASKS_SIZE 15000000
-#define EXPAND_THRESHOLD 3520
+#define EXPAND_THRESHOLD 286
 #define BUFFER_SIZE 100000000
 #define BUFFER_OFFSET_SIZE 1000000
 #define CLIQUES_SIZE 50000000
@@ -38,9 +38,9 @@ using namespace std;
 #define WVERTICES_SIZE 20000
 
 // shared memory size: 12.300 ints
-#define VERTICES_SIZE 75
+#define VERTICES_SIZE 120
  
-#define BLOCK_SIZE 512
+#define BLOCK_SIZE 416
 #define NUM_OF_BLOCKS 22
 #define WARP_SIZE 32
 
@@ -318,6 +318,7 @@ inline void chkerr(cudaError_t code);
 
 void print_CPU_Data(CPU_Data& host_data);
 void print_GPU_Data(GPU_Data& device_data);
+void print_CPU_Graph(CPU_Graph& host_graph);
 void print_GPU_Graph(GPU_Data& device_data, CPU_Graph& host_graph);
 void print_WTask_Buffers(GPU_Data& device_data);
 void print_WClique_Buffers(GPU_Data& device_data);
@@ -349,6 +350,8 @@ int* minimum_degrees;
 
 
 
+// TODO - verify dumping cliques works
+// TODO - test program on larger graphs
 // TODO - increase thread usage by monitoring and improving memory usage
 
 // MAIN
@@ -387,6 +390,9 @@ int main(int argc, char* argv[])
     graph_stream.close();
     calculate_minimum_degrees(input_graph);
     ofstream temp_results("temp.txt");
+
+    // DEBUG
+    //print_CPU_Graph(input_graph);
 
     // SEARCH
     search(input_graph, temp_results);
@@ -448,6 +454,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
     //print_GPU_Graph(device_data, input_graph);
     //print_CPU_Data(host_data);
     //print_GPU_Data(device_data);
+    print_Data_Sizes(device_data);
 
     // UNSURE - are all device syncs are necessary? how does chkerr effect this
     // EXPAND LEVEL
@@ -483,7 +490,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
         // DEBUG
         //print_GPU_Data(device_data);
         //print_GPU_Cliques(device_cliques);
-        //print_Data_Sizes(device_data, device_cliques);
+        print_Data_Sizes(device_data);
         //bool debug;
         //chkerr(cudaMemcpy(&debug, device_data.debug, sizeof(bool), cudaMemcpyDeviceToHost));
         //if (debug) {
@@ -746,6 +753,7 @@ void initialize_tasks(CPU_Graph& graph, CPU_Data& host_data)
     {
 
 
+
         // REMOVE CANDIDATE
         // only done after first iteration of for loop
         if (i > number_of_covered_vertices) {
@@ -782,9 +790,6 @@ void initialize_tasks(CPU_Graph& graph, CPU_Data& host_data)
 
         // NEW VERTICES
         new_vertices = new Vertex[total_vertices];
-        if (new_vertices == nullptr) {
-            cout << "ERROR: bad malloc" << endl;
-        }
         total_new_vertices = total_vertices;
         for (int j = 0; j < total_new_vertices; j++) {
             new_vertices[j].vertexid = old_vertices[j].vertexid;
@@ -835,16 +840,16 @@ void initialize_tasks(CPU_Graph& graph, CPU_Data& host_data)
         qsort(new_vertices, total_new_vertices, sizeof(Vertex), sort_vertices);
 
         // update exdeg of vertices connected to removed cands
-        for (int i = 0; i < total_vertices - number_of_removed_candidates; i++) {
-            pvertexid = old_vertices[i].vertexid;
-            for (int j = total_vertices - number_of_removed_candidates; j < total_vertices; j++) {
-                phelper1 = old_vertices[j].vertexid;
+        for (int i = 0; i < total_new_vertices - number_of_removed_candidates; i++) {
+            pvertexid = new_vertices[i].vertexid;
+            for (int j = total_new_vertices - number_of_removed_candidates; j < total_new_vertices; j++) {
+                phelper1 = new_vertices[j].vertexid;
                 pneighbors_start = graph.onehop_offsets[phelper1];
                 pneighbors_end = graph.onehop_offsets[phelper1 + 1];
                 pneighbors_count = pneighbors_end - pneighbors_start;
                 phelper2 = binary_search_array(graph.onehop_neighbors + pneighbors_start, pneighbors_count, pvertexid);
                 if (phelper2 != -1) {
-                    old_vertices[i].exdeg--;
+                    new_vertices[i].exdeg--;
                 }
 
                 pneighbors_start = graph.twohop_offsets[phelper1];
@@ -852,11 +857,11 @@ void initialize_tasks(CPU_Graph& graph, CPU_Data& host_data)
                 pneighbors_count = pneighbors_end - pneighbors_start;
                 phelper2 = binary_search_array(graph.twohop_neighbors + pneighbors_start, pneighbors_count, pvertexid);
                 if (phelper2 != -1) {
-                    old_vertices[i].lvl2adj--;
+                    new_vertices[i].lvl2adj--;
                 }
             }
         }
-        total_vertices -= number_of_removed_candidates;
+        total_new_vertices -= number_of_removed_candidates;
 
         // continue if not enough vertices after pruning
         if (total_new_vertices < minimum_clique_size) {
@@ -878,16 +883,16 @@ void initialize_tasks(CPU_Graph& graph, CPU_Data& host_data)
             qsort(new_vertices, total_new_vertices, sizeof(Vertex), sort_vertices);
 
             // update exdeg of vertices connected to removed cands
-            for (int i = 0; i < total_vertices - number_of_removed_candidates; i++) {
-                pvertexid = old_vertices[i].vertexid;
-                for (int j = total_vertices - number_of_removed_candidates; j < total_vertices; j++) {
-                    phelper1 = old_vertices[j].vertexid;
+            for (int i = 0; i < total_new_vertices - number_of_removed_candidates; i++) {
+                pvertexid = new_vertices[i].vertexid;
+                for (int j = total_new_vertices - number_of_removed_candidates; j < total_new_vertices; j++) {
+                    phelper1 = new_vertices[j].vertexid;
                     pneighbors_start = graph.onehop_offsets[phelper1];
                     pneighbors_end = graph.onehop_offsets[phelper1 + 1];
                     pneighbors_count = pneighbors_end - pneighbors_start;
                     phelper2 = binary_search_array(graph.onehop_neighbors + pneighbors_start, pneighbors_count, pvertexid);
                     if (phelper2 != -1) {
-                        old_vertices[i].exdeg--;
+                        new_vertices[i].exdeg--;
                     }
 
                     pneighbors_start = graph.twohop_offsets[phelper1];
@@ -895,11 +900,11 @@ void initialize_tasks(CPU_Graph& graph, CPU_Data& host_data)
                     pneighbors_count = pneighbors_end - pneighbors_start;
                     phelper2 = binary_search_array(graph.twohop_neighbors + pneighbors_start, pneighbors_count, pvertexid);
                     if (phelper2 != -1) {
-                        old_vertices[i].lvl2adj--;
+                        new_vertices[i].lvl2adj--;
                     }
                 }
             }
-            total_vertices -= number_of_removed_candidates;
+            total_new_vertices -= number_of_removed_candidates;
         } while (number_of_removed_candidates > 0);
 
         // continue if not enough vertices after pruning
@@ -1201,6 +1206,28 @@ inline void chkerr(cudaError_t code)
 
 
 // --- DEBUG METHODS ---
+
+void print_CPU_Graph(CPU_Graph& host_graph) {
+    cout << endl << " --- (CPU_Graph)host_graph details --- " << endl;
+    cout << endl << "|V|: " << host_graph.number_of_vertices << " |E|: " << host_graph.number_of_edges << endl;
+    cout << endl << "Onehop Offsets:" << endl;
+    for (uint64_t i = 0; i <= host_graph.number_of_vertices; i++) {
+        cout << host_graph.onehop_offsets[i] << " ";
+    }
+    cout << endl << "Onehop Neighbors:" << endl;
+    for (uint64_t i = 0; i < host_graph.number_of_onehop_neighbors; i++) {
+        cout << host_graph.onehop_neighbors[i] << " ";
+    }
+    cout << endl << "Twohop Offsets:" << endl;
+    for (uint64_t i = 0; i <= host_graph.number_of_vertices; i++) {
+        cout << host_graph.twohop_offsets[i] << " ";
+    }
+    cout << endl << "Twohop Neighbors:" << endl;
+    for (uint64_t i = 0; i < host_graph.number_of_twohop_neighbors; i++) {
+        cout << host_graph.twohop_neighbors[i] << " ";
+    }
+    cout << endl << endl;
+}
 
 void print_GPU_Graph(GPU_Data& device_data, CPU_Graph& host_graph)
 {
@@ -2071,6 +2098,7 @@ __global__ void transfer_buffers(GPU_Data device_data)
             cliques_write[warp_in_block_idx] += device_data.wcliques_offset[(WCLIQUES_OFFSET_SIZE * i) + device_data.wcliques_count[i]];
         }
     }
+    __syncwarp();
 
     // move to tasks and buffer
     for (int i = (idx % WARP_SIZE) + 1; i <= device_data.wtasks_count[(idx / WARP_SIZE)]; i += WARP_SIZE)

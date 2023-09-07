@@ -7,5 +7,6 @@
     <Text Include="notes.txt" />
     <Text Include="GSE1730_q.txt" />
     <Text Include="GSE10158_q.txt" />
+    <Text Include="Enron_q.txt" />
   </ItemGroup>
 </Project>

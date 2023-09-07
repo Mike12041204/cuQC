@@ -12,3 +12,5 @@
     int wcliques_offset_write = (WCLIQUES_OFFSET_SIZE * (idx / WARP_SIZE));
     int wvertices_write = (WVERTICES_SIZE * (idx / WARP_SIZE));
     int svertices_write = (VERTICES_SIZE * ((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE));
+
+    -1073741819.
