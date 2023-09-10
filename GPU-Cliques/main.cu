@@ -339,6 +339,7 @@ __device__ void calculate_LU_bounds(GPU_Data& device_data, Warp_Data& warp_data,
 __device__ void device_sort(Vertex* target, int size, int lane_idx);
 __device__ void sort_vert(Vertex& vertex1, Vertex& vertex2, int& result);
 __device__ int device_bsearch_array(int* search_array, int array_size, int search_number);
+__device__ bool device_cand_isvalid(Vertex& vertex, int number_of_members, GPU_Data& device_data);
 __device__ bool device_cand_isvalid_LU(Vertex& vertex, GPU_Data& device_data, Warp_Data& warp_data, Local_Data& local_data);
 __device__ bool device_vert_isextendable(Vertex& vertex, int number_of_members, GPU_Data& device_data);
 __device__ bool device_vert_isextendable_LU(Vertex& vertex, GPU_Data& device_data, Warp_Data& warp_data, Local_Data& local_data);
@@ -354,6 +355,7 @@ int* minimum_degrees;
 // TODO - verify dumping cliques works
 // TODO - test program on larger graphs
 // TODO - increase thread usage by monitoring and improving memory usage
+// UNSURE - inline smaller methods?
 
 // MAIN
 int main(int argc, char* argv[])
@@ -1930,7 +1932,7 @@ __global__ void expand_level(GPU_Data device_data)
                 // check for failed vertices
                 failed_found = false;
                 for (int k = (local_data.idx % WARP_SIZE); k < warp_data.number_of_members[local_data.warp_in_block_idx]; k += WARP_SIZE) {
-                    if (!device_vert_isextendable(local_data.vertices[k], device_data, warp_data, local_data)) {
+                    if (!device_vert_isextendable(local_data.vertices[k], warp_data.number_of_members[local_data.warp_in_block_idx], device_data)) {
                         failed_found = true;
                         break;
                     }
@@ -1945,7 +1947,7 @@ __global__ void expand_level(GPU_Data device_data)
                 number_of_removed_candidates = 0;
                 for (int k = warp_data.number_of_members[local_data.warp_in_block_idx] + (local_data.idx % WARP_SIZE); k < warp_data.total_vertices[local_data.warp_in_block_idx];
                     k += WARP_SIZE) {
-                    if (!device_cand_isvalid(local_data.vertices[k], device_data, warp_data, local_data)) {
+                    if (!device_cand_isvalid(local_data.vertices[k], warp_data.number_of_members[local_data.warp_in_block_idx], device_data)) {
                         local_data.vertices[k].label = -1;
                         number_of_removed_candidates++;
                     }
@@ -2487,6 +2489,7 @@ __device__ void device_sort(Vertex* target, int size, int lane_idx)
     }
 }
 
+// TODO - use return rather than result reference
 __device__ void sort_vert(Vertex& vertex1, Vertex& vertex2, int& result)
 {
     // order is: in clique -> covered -> critical adj vertices -> cands -> cover -> pruned
@@ -2627,6 +2630,22 @@ __device__ bool device_vert_isextendable(Vertex& vertex, int number_of_members, 
         return false;
     }
     else if (vertex.indeg + vertex.exdeg < device_get_mindeg(number_of_members+vertex.exdeg, device_data)) {
+        return false;
+    }
+    else {
+        return true;
+    }
+}
+
+__device__ bool device_cand_isvalid(Vertex& vertex, int number_of_members, GPU_Data& device_data)
+{
+    if (vertex.indeg + vertex.exdeg < device_data.minimum_degrees[(*(device_data.minimum_clique_size))]) {
+        return false;
+    }
+    else if (vertex.lvl2adj < (*(device_data.minimum_clique_size)) - 1) {
+        return false;
+    }
+    else if (vertex.indeg + vertex.exdeg < device_get_mindeg(number_of_members + vertex.exdeg + 1, device_data)) {
         return false;
     }
     else {
