@@ -498,10 +498,10 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
         //    cout << "!!!DEBUG!!! " << endl;
         //}
         //chkerr(cudaMemset(device_data.debug, false, sizeof(bool)));
-        int idebug;
-        chkerr(cudaMemcpy(&idebug, device_data.idebug, sizeof(int), cudaMemcpyDeviceToHost));
-        cout << "LU-PRUNING REMOVED: " << idebug << endl;
-        chkerr(cudaMemset(device_data.idebug, 0, sizeof(int)));
+        //int idebug;
+        //chkerr(cudaMemcpy(&idebug, device_data.idebug, sizeof(int), cudaMemcpyDeviceToHost));
+        //cout << "LU-PRUNING REMOVED: " << idebug << endl;
+        //chkerr(cudaMemset(device_data.idebug, 0, sizeof(int)));
     }
 
     dump_cliques(host_cliques, device_data, temp_results);
@@ -1921,7 +1921,7 @@ __global__ void expand_level(GPU_Data device_data)
             do
             {
                 // calculate lower and upper bounds for vertices
-                calculate_LU_bounds(device_data, warp_data, local_data);
+                //calculate_LU_bounds(device_data, warp_data, local_data);
 
                 if (warp_data.invalid_bounds[local_data.warp_in_block_idx]) {
                     break;
@@ -1930,7 +1930,7 @@ __global__ void expand_level(GPU_Data device_data)
                 // check for failed vertices
                 failed_found = false;
                 for (int k = (local_data.idx % WARP_SIZE); k < warp_data.number_of_members[local_data.warp_in_block_idx]; k += WARP_SIZE) {
-                    if (!device_vert_isextendable_LU(local_data.vertices[k], device_data, warp_data, local_data)) {
+                    if (!device_vert_isextendable(local_data.vertices[k], device_data, warp_data, local_data)) {
                         failed_found = true;
                         break;
                     }
@@ -1945,7 +1945,7 @@ __global__ void expand_level(GPU_Data device_data)
                 number_of_removed_candidates = 0;
                 for (int k = warp_data.number_of_members[local_data.warp_in_block_idx] + (local_data.idx % WARP_SIZE); k < warp_data.total_vertices[local_data.warp_in_block_idx];
                     k += WARP_SIZE) {
-                    if (!device_cand_isvalid_LU(local_data.vertices[k], device_data, warp_data, local_data)) {
+                    if (!device_cand_isvalid(local_data.vertices[k], device_data, warp_data, local_data)) {
                         local_data.vertices[k].label = -1;
                         number_of_removed_candidates++;
                     }
