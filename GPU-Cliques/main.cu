@@ -235,6 +235,7 @@ struct GPU_Data
 
     // DEBUG
     bool* debug;
+    int* idebug;
 
     // GPU GRAPH
     int* number_of_vertices;
@@ -497,6 +498,10 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
         //    cout << "!!!DEBUG!!! " << endl;
         //}
         //chkerr(cudaMemset(device_data.debug, false, sizeof(bool)));
+        int idebug;
+        chkerr(cudaMemcpy(&idebug, device_data.idebug, sizeof(int), cudaMemcpyDeviceToHost));
+        cout << "LU-PRUNING REMOVED: " << idebug << endl;
+        chkerr(cudaMemset(device_data.idebug, 0, sizeof(int)));
     }
 
     dump_cliques(host_cliques, device_data, temp_results);
@@ -634,8 +639,10 @@ void allocate_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& ho
 
     // DEBUG
     chkerr(cudaMalloc((void**)&device_data.debug, sizeof(bool)));
+    chkerr(cudaMalloc((void**)&device_data.idebug, sizeof(int)));
 
     chkerr(cudaMemset(device_data.debug, false, sizeof(bool)));
+    chkerr(cudaMemset(device_data.idebug, 0, sizeof(int)));
 }
 
 // processes 0th and 1st level of expansion
@@ -1054,6 +1061,10 @@ void free_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& host_c
     chkerr(cudaFree(device_data.buffer_start));
     chkerr(cudaFree(device_data.cliques_offset_start));
     chkerr(cudaFree(device_data.cliques_start));
+
+    //DEBUG
+    chkerr(cudaFree(device_data.debug));
+    chkerr(cudaFree(device_data.idebug));
 }
 
 
@@ -1824,7 +1835,6 @@ __global__ void expand_level(GPU_Data device_data)
             }
             __syncwarp();
 
-
             // update the exdeg and indeg of all vertices adj to the vertex just added to the vertex set
             pvertexid = local_data.vertices[warp_data.total_vertices[local_data.warp_in_block_idx] - 1].vertexid;
             for (int k = (local_data.idx % WARP_SIZE); k < warp_data.total_vertices[local_data.warp_in_block_idx]; k += WARP_SIZE) {
@@ -1942,6 +1952,10 @@ __global__ void expand_level(GPU_Data device_data)
                 }
                 for (int k = 1; k < 32; k *= 2) {
                     number_of_removed_candidates += __shfl_xor_sync(0xFFFFFFFF, number_of_removed_candidates, k);
+                }
+                // DEBUG
+                if (local_data.idx % WARP_SIZE == 0) {
+                    atomicAdd(device_data.idebug, number_of_removed_candidates);
                 }
                 device_sort(local_data.vertices + warp_data.number_of_members[local_data.warp_in_block_idx], warp_data.number_of_candidates[local_data.warp_in_block_idx],
                     (local_data.idx % WARP_SIZE));
