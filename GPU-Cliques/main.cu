@@ -23,7 +23,7 @@ using namespace std;
 
 // global memory size: 1.500.000.000 ints
 #define TASKS_SIZE 15000000
-#define EXPAND_THRESHOLD 286
+#define EXPAND_THRESHOLD 284
 #define BUFFER_SIZE 100000000
 #define BUFFER_OFFSET_SIZE 1000000
 #define CLIQUES_SIZE 50000000
@@ -38,7 +38,7 @@ using namespace std;
 #define WVERTICES_SIZE 20000
 
 // shared memory size: 12.300 ints
-#define VERTICES_SIZE 120
+#define VERTICES_SIZE 110
  
 #define BLOCK_SIZE 416
 #define NUM_OF_BLOCKS 22
@@ -304,47 +304,55 @@ struct Local_Data
 // METHODS
 void calculate_minimum_degrees(CPU_Graph& graph);
 void search(CPU_Graph& input_graph, ofstream& temp_results);
-void allocate_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& host_cliques, CPU_Graph& input_graph);
+void allocate_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_cliques, CPU_Graph& input_graph);
 void initialize_tasks(CPU_Graph& graph, CPU_Data& host_data);
-void move_to_gpu(CPU_Data& host_data, GPU_Data& device_data);
-void dump_cliques(CPU_Cliques& host_cliques, GPU_Data& device_data, ofstream& output_file);
-void free_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& host_cliques);
+void move_to_gpu(CPU_Data& host_data, GPU_Data& dd);
+void dump_cliques(CPU_Cliques& host_cliques, GPU_Data& dd, ofstream& output_file);
+void free_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_cliques);
 void RemoveNonMax(char* szset_filename, char* szoutput_filename);
 
 int binary_search_array(int* search_array, int array_size, int search_number);
 int sort_vertices(const void* a, const void* b);
-int get_mindeg(int clique_size);
-bool cand_isvalid(Vertex& vertex, int clique_size);
+inline int get_mindeg(int clique_size);
+inline bool cand_isvalid(Vertex& vertex, int clique_size);
 inline void chkerr(cudaError_t code);
 
 void print_CPU_Data(CPU_Data& host_data);
-void print_GPU_Data(GPU_Data& device_data);
+void print_GPU_Data(GPU_Data& dd);
 void print_CPU_Graph(CPU_Graph& host_graph);
-void print_GPU_Graph(GPU_Data& device_data, CPU_Graph& host_graph);
-void print_WTask_Buffers(GPU_Data& device_data);
-void print_WClique_Buffers(GPU_Data& device_data);
-void print_GPU_Cliques(GPU_Data& device_data);
+void print_GPU_Graph(GPU_Data& dd, CPU_Graph& host_graph);
+void print_WTask_Buffers(GPU_Data& dd);
+void print_WClique_Buffers(GPU_Data& dd);
+void print_GPU_Cliques(GPU_Data& dd);
 void print_CPU_Cliques(CPU_Cliques& host_cliques);
-void print_Data_Sizes(GPU_Data& device_data);
+void print_Data_Sizes(GPU_Data& dd);
 void print_vertices(Vertex* vertices, int size);
 
 // KERNELS
-__global__ void expand_level(GPU_Data device_data);
-__global__ void transfer_buffers(GPU_Data device_data);
-__global__ void fill_from_buffer(GPU_Data device_data);
-__device__ void check_for_clique(GPU_Data& device_data, Warp_Data& warp_data, Local_Data& local_data);
-__device__ void write_to_tasks(GPU_Data& device_data, Warp_Data& warp_data, Local_Data& local_data);
-__device__ void calculate_LU_bounds(GPU_Data& device_data, Warp_Data& warp_data, Local_Data& local_data);
+__global__ void expand_level(GPU_Data dd);
+__global__ void transfer_buffers(GPU_Data dd);
+__global__ void fill_from_buffer(GPU_Data dd);
+__device__ int lookahead_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
+__device__ int remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
+__device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
+__device__ void check_for_clique(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
+__device__ void write_to_tasks(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
+__device__ void diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, int pvertexid);
+__device__ void degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, bool& failed_found);
+__device__ void update_degrees(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, int number_of_removed_candidates);
+__device__ void calculate_LU_bounds(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
 
+__device__ void degree_pruning_nonLU(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, bool& failed_found);
 __device__ void device_sort(Vertex* target, int size, int lane_idx);
-__device__ void sort_vert(Vertex& vertex1, Vertex& vertex2, int& result);
+__device__ __forceinline int sort_vert(Vertex& vertex1, Vertex& vertex2);
 __device__ int device_bsearch_array(int* search_array, int array_size, int search_number);
-__device__ bool device_cand_isvalid(Vertex& vertex, int number_of_members, GPU_Data& device_data);
-__device__ bool device_cand_isvalid_LU(Vertex& vertex, GPU_Data& device_data, Warp_Data& warp_data, Local_Data& local_data);
-__device__ bool device_vert_isextendable(Vertex& vertex, int number_of_members, GPU_Data& device_data);
-__device__ bool device_vert_isextendable_LU(Vertex& vertex, GPU_Data& device_data, Warp_Data& warp_data, Local_Data& local_data);
-__device__ int device_get_mindeg(int number_of_members, GPU_Data& device_data);
+__device__ __forceinline bool device_cand_isvalid(Vertex& vertex, int number_of_members, GPU_Data& dd);
+__device__ __forceinline bool device_cand_isvalid_LU(Vertex& vertex, GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
+__device__ __forceinline bool device_vert_isextendable(Vertex& vertex, int number_of_members, GPU_Data& dd);
+__device__ __forceinline bool device_vert_isextendable_LU(Vertex& vertex, GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
+__device__ __forceinline int device_get_mindeg(int number_of_members, GPU_Data& dd);
 
+// TODO - make local
 // INPUT SETTINGS
 double minimum_degree_ratio;
 int minimum_clique_size;
@@ -355,7 +363,6 @@ int* minimum_degrees;
 // TODO - verify dumping cliques works
 // TODO - test program on larger graphs
 // TODO - increase thread usage by monitoring and improving memory usage
-// UNSURE - inline smaller methods?
 
 // MAIN
 int main(int argc, char* argv[])
@@ -439,10 +446,10 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
     // DATA STRUCTURES
     CPU_Data host_data;
     CPU_Cliques host_cliques;
-    GPU_Data device_data;
+    GPU_Data dd;
 
     // HANDLE MEMORY
-    allocate_memory(host_data, device_data, host_cliques, input_graph);
+    allocate_memory(host_data, dd, host_cliques, input_graph);
     cudaDeviceSynchronize();
 
     // INITIALIZE TASKS
@@ -450,87 +457,89 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
     initialize_tasks(input_graph, host_data);
 
     // TRANSFER TO GPU
-    move_to_gpu(host_data, device_data);
+    move_to_gpu(host_data, dd);
     cudaDeviceSynchronize();
 
     // DEBUG
-    //print_GPU_Graph(device_data, input_graph);
+    //print_GPU_Graph(dd, input_graph);
     //print_CPU_Data(host_data);
-    //print_GPU_Data(device_data);
-    print_Data_Sizes(device_data);
+    //print_GPU_Data(dd);
+    print_Data_Sizes(dd);
 
     // UNSURE - are all device syncs are necessary? how does chkerr effect this
     // EXPAND LEVEL
     cout << ">:BEGINNING EXPANSION" << endl;
     while (!(*host_data.maximal_expansion))
     {
-        chkerr(cudaMemset(device_data.maximal_expansion, true, sizeof(bool)));
-        chkerr(cudaMemset(device_data.dumping_cliques, false, sizeof(bool)));
+        chkerr(cudaMemset(dd.maximal_expansion, true, sizeof(bool)));
+        chkerr(cudaMemset(dd.dumping_cliques, false, sizeof(bool)));
         cudaDeviceSynchronize();
 
-        expand_level<<<NUM_OF_BLOCKS, BLOCK_SIZE >>>(device_data);
+        expand_level<<<NUM_OF_BLOCKS, BLOCK_SIZE >>>(dd);
         cudaDeviceSynchronize();
 
         // DEBUG
         //print_WClique_Buffers(device_cliques);
-        //print_WTask_Buffers(device_data);
+        //print_WTask_Buffers(dd);
+        //int idebug;
+        //chkerr(cudaMemcpy(&idebug, dd.idebug, sizeof(int), cudaMemcpyDeviceToHost));
+        //cout << "IDebug: " << idebug << flush;
+        //chkerr(cudaMemcpy(&idebug, dd.total_tasks, sizeof(int), cudaMemcpyDeviceToHost));
+        //cout << " " << idebug << endl;
+        //chkerr(cudaMemset(dd.idebug, 0, sizeof(int)));
 
-        transfer_buffers<<<NUM_OF_BLOCKS, BLOCK_SIZE>>>(device_data);
+        transfer_buffers<<<NUM_OF_BLOCKS, BLOCK_SIZE>>>(dd);
         cudaDeviceSynchronize();
 
-        fill_from_buffer<<<NUM_OF_BLOCKS, BLOCK_SIZE>>>(device_data);
+        fill_from_buffer<<<NUM_OF_BLOCKS, BLOCK_SIZE>>>(dd);
         cudaDeviceSynchronize();
 
-        chkerr(cudaMemcpy(host_data.maximal_expansion, device_data.maximal_expansion, sizeof(bool), cudaMemcpyDeviceToHost));
-        chkerr(cudaMemcpy(host_data.dumping_cliques, device_data.dumping_cliques, sizeof(bool), cudaMemcpyDeviceToHost));
+        chkerr(cudaMemcpy(host_data.maximal_expansion, dd.maximal_expansion, sizeof(bool), cudaMemcpyDeviceToHost));
+        chkerr(cudaMemcpy(host_data.dumping_cliques, dd.dumping_cliques, sizeof(bool), cudaMemcpyDeviceToHost));
 
         cudaDeviceSynchronize();
 
         if (*host_data.dumping_cliques) {
-            dump_cliques(host_cliques, device_data, temp_results);
+            dump_cliques(host_cliques, dd, temp_results);
         }
 
         // DEBUG
-        //print_GPU_Data(device_data);
+        //print_GPU_Data(dd);
         //print_GPU_Cliques(device_cliques);
-        print_Data_Sizes(device_data);
+        print_Data_Sizes(dd);
         //bool debug;
-        //chkerr(cudaMemcpy(&debug, device_data.debug, sizeof(bool), cudaMemcpyDeviceToHost));
+        //chkerr(cudaMemcpy(&debug, dd.debug, sizeof(bool), cudaMemcpyDeviceToHost));
         //if (debug) {
         //    cout << "!!!DEBUG!!! " << endl;
         //}
-        //chkerr(cudaMemset(device_data.debug, false, sizeof(bool)));
-        //int idebug;
-        //chkerr(cudaMemcpy(&idebug, device_data.idebug, sizeof(int), cudaMemcpyDeviceToHost));
-        //cout << "LU-PRUNING REMOVED: " << idebug << endl;
-        //chkerr(cudaMemset(device_data.idebug, 0, sizeof(int)));
+        //chkerr(cudaMemset(dd.debug, false, sizeof(bool)));
     }
 
-    dump_cliques(host_cliques, device_data, temp_results);
+    dump_cliques(host_cliques, dd, temp_results);
 
     // FREE MEMORY
-    free_memory(host_data, device_data, host_cliques);
+    free_memory(host_data, dd, host_cliques);
 }
 
 // allocates memory for the data structures on the host and device
-void allocate_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& host_cliques, CPU_Graph& input_graph)
+void allocate_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_cliques, CPU_Graph& input_graph)
 {
     int number_of_warps = (NUM_OF_BLOCKS * BLOCK_SIZE) / WARP_SIZE;
 
     // GPU GRAPH
-    chkerr(cudaMalloc((void**)&device_data.number_of_vertices, sizeof(int)));
-    chkerr(cudaMalloc((void**)&device_data.number_of_edges, sizeof(int)));
-    chkerr(cudaMalloc((void**)&device_data.onehop_neighbors, sizeof(int) * input_graph.number_of_onehop_neighbors));
-    chkerr(cudaMalloc((void**)&device_data.onehop_offsets, sizeof(uint64_t) * (input_graph.number_of_vertices + 1)));
-    chkerr(cudaMalloc((void**)&device_data.twohop_neighbors, sizeof(int) * input_graph.number_of_twohop_neighbors));
-    chkerr(cudaMalloc((void**)&device_data.twohop_offsets, sizeof(uint64_t) * (input_graph.number_of_vertices + 1)));
+    chkerr(cudaMalloc((void**)&dd.number_of_vertices, sizeof(int)));
+    chkerr(cudaMalloc((void**)&dd.number_of_edges, sizeof(int)));
+    chkerr(cudaMalloc((void**)&dd.onehop_neighbors, sizeof(int) * input_graph.number_of_onehop_neighbors));
+    chkerr(cudaMalloc((void**)&dd.onehop_offsets, sizeof(uint64_t) * (input_graph.number_of_vertices + 1)));
+    chkerr(cudaMalloc((void**)&dd.twohop_neighbors, sizeof(int) * input_graph.number_of_twohop_neighbors));
+    chkerr(cudaMalloc((void**)&dd.twohop_offsets, sizeof(uint64_t) * (input_graph.number_of_vertices + 1)));
 
-    chkerr(cudaMemcpy(device_data.number_of_vertices, &(input_graph.number_of_vertices), sizeof(int), cudaMemcpyHostToDevice));
-    chkerr(cudaMemcpy(device_data.number_of_edges, &(input_graph.number_of_edges), sizeof(int), cudaMemcpyHostToDevice));
-    chkerr(cudaMemcpy(device_data.onehop_neighbors, input_graph.onehop_neighbors, sizeof(int) * input_graph.number_of_onehop_neighbors, cudaMemcpyHostToDevice));
-    chkerr(cudaMemcpy(device_data.onehop_offsets, input_graph.onehop_offsets, sizeof(uint64_t) * (input_graph.number_of_vertices + 1), cudaMemcpyHostToDevice));
-    chkerr(cudaMemcpy(device_data.twohop_neighbors, input_graph.twohop_neighbors, sizeof(int) * input_graph.number_of_twohop_neighbors, cudaMemcpyHostToDevice));
-    chkerr(cudaMemcpy(device_data.twohop_offsets, input_graph.twohop_offsets, sizeof(uint64_t) * (input_graph.number_of_vertices + 1), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(dd.number_of_vertices, &(input_graph.number_of_vertices), sizeof(int), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(dd.number_of_edges, &(input_graph.number_of_edges), sizeof(int), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(dd.onehop_neighbors, input_graph.onehop_neighbors, sizeof(int) * input_graph.number_of_onehop_neighbors, cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(dd.onehop_offsets, input_graph.onehop_offsets, sizeof(uint64_t) * (input_graph.number_of_vertices + 1), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(dd.twohop_neighbors, input_graph.twohop_neighbors, sizeof(int) * input_graph.number_of_twohop_neighbors, cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(dd.twohop_offsets, input_graph.twohop_offsets, sizeof(uint64_t) * (input_graph.number_of_vertices + 1), cudaMemcpyHostToDevice));
 
     // CPU DATA
     host_data.tasks1_count = new uint64_t;
@@ -554,58 +563,58 @@ void allocate_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& ho
     (*host_data.dumping_cliques) = false;
 
     // GPU DATA
-    chkerr(cudaMalloc((void**)&device_data.current_level, sizeof(uint64_t)));
+    chkerr(cudaMalloc((void**)&dd.current_level, sizeof(uint64_t)));
 
     uint64_t temp = 1;
-    chkerr(cudaMemcpy(device_data.current_level, &temp, sizeof(uint64_t), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(dd.current_level, &temp, sizeof(uint64_t), cudaMemcpyHostToDevice));
 
-    chkerr(cudaMalloc((void**)&device_data.tasks1_count, sizeof(uint64_t)));
-    chkerr(cudaMalloc((void**)&device_data.tasks1_offset, sizeof(uint64_t) * (EXPAND_THRESHOLD + 1)));
-    chkerr(cudaMalloc((void**)&device_data.tasks1_vertices, sizeof(Vertex) * TASKS_SIZE));
+    chkerr(cudaMalloc((void**)&dd.tasks1_count, sizeof(uint64_t)));
+    chkerr(cudaMalloc((void**)&dd.tasks1_offset, sizeof(uint64_t) * (EXPAND_THRESHOLD + 1)));
+    chkerr(cudaMalloc((void**)&dd.tasks1_vertices, sizeof(Vertex) * TASKS_SIZE));
 
-    chkerr(cudaMemset(device_data.tasks1_offset, 0, sizeof(uint64_t)));
-    chkerr(cudaMemset(device_data.tasks1_count, 0, sizeof(uint64_t)));
+    chkerr(cudaMemset(dd.tasks1_offset, 0, sizeof(uint64_t)));
+    chkerr(cudaMemset(dd.tasks1_count, 0, sizeof(uint64_t)));
 
-    chkerr(cudaMalloc((void**)&device_data.tasks2_count, sizeof(uint64_t)));
-    chkerr(cudaMalloc((void**)&device_data.tasks2_offset, sizeof(uint64_t) * (EXPAND_THRESHOLD + 1)));
-    chkerr(cudaMalloc((void**)&device_data.tasks2_vertices, sizeof(Vertex) * TASKS_SIZE));
+    chkerr(cudaMalloc((void**)&dd.tasks2_count, sizeof(uint64_t)));
+    chkerr(cudaMalloc((void**)&dd.tasks2_offset, sizeof(uint64_t) * (EXPAND_THRESHOLD + 1)));
+    chkerr(cudaMalloc((void**)&dd.tasks2_vertices, sizeof(Vertex) * TASKS_SIZE));
 
-    chkerr(cudaMemset(device_data.tasks2_offset, 0, sizeof(uint64_t)));
-    chkerr(cudaMemset(device_data.tasks2_count, 0, sizeof(uint64_t)));
+    chkerr(cudaMemset(dd.tasks2_offset, 0, sizeof(uint64_t)));
+    chkerr(cudaMemset(dd.tasks2_count, 0, sizeof(uint64_t)));
 
-    chkerr(cudaMalloc((void**)&device_data.buffer_count, sizeof(uint64_t)));
-    chkerr(cudaMalloc((void**)&device_data.buffer_offset, sizeof(uint64_t) * BUFFER_OFFSET_SIZE));
-    chkerr(cudaMalloc((void**)&device_data.buffer_vertices, sizeof(Vertex) * BUFFER_SIZE));
+    chkerr(cudaMalloc((void**)&dd.buffer_count, sizeof(uint64_t)));
+    chkerr(cudaMalloc((void**)&dd.buffer_offset, sizeof(uint64_t) * BUFFER_OFFSET_SIZE));
+    chkerr(cudaMalloc((void**)&dd.buffer_vertices, sizeof(Vertex) * BUFFER_SIZE));
 
-    chkerr(cudaMemset(device_data.buffer_offset, 0, sizeof(uint64_t)));
-    chkerr(cudaMemset(device_data.buffer_count, 0, sizeof(uint64_t)));
+    chkerr(cudaMemset(dd.buffer_offset, 0, sizeof(uint64_t)));
+    chkerr(cudaMemset(dd.buffer_count, 0, sizeof(uint64_t)));
 
-    chkerr(cudaMalloc((void**)&device_data.wtasks_count, sizeof(uint64_t) * number_of_warps));
-    chkerr(cudaMalloc((void**)&device_data.wtasks_offset, (sizeof(uint64_t) * WTASKS_OFFSET_SIZE) * number_of_warps));
-    chkerr(cudaMalloc((void**)&device_data.wtasks_vertices, (sizeof(Vertex) * WTASKS_SIZE) * number_of_warps));
+    chkerr(cudaMalloc((void**)&dd.wtasks_count, sizeof(uint64_t) * number_of_warps));
+    chkerr(cudaMalloc((void**)&dd.wtasks_offset, (sizeof(uint64_t) * WTASKS_OFFSET_SIZE) * number_of_warps));
+    chkerr(cudaMalloc((void**)&dd.wtasks_vertices, (sizeof(Vertex) * WTASKS_SIZE) * number_of_warps));
 
-    chkerr(cudaMemset(device_data.wtasks_offset, 0, (sizeof(uint64_t) * WTASKS_OFFSET_SIZE) * number_of_warps));
-    chkerr(cudaMemset(device_data.wtasks_count, 0, sizeof(uint64_t) * number_of_warps));
+    chkerr(cudaMemset(dd.wtasks_offset, 0, (sizeof(uint64_t) * WTASKS_OFFSET_SIZE) * number_of_warps));
+    chkerr(cudaMemset(dd.wtasks_count, 0, sizeof(uint64_t) * number_of_warps));
 
-    chkerr(cudaMalloc((void**)&device_data.wvertices, (sizeof(Vertex) * WVERTICES_SIZE) * number_of_warps));
+    chkerr(cudaMalloc((void**)&dd.wvertices, (sizeof(Vertex) * WVERTICES_SIZE) * number_of_warps));
 
-    chkerr(cudaMalloc((void**)&device_data.maximal_expansion, sizeof(bool)));
-    chkerr(cudaMalloc((void**)&device_data.dumping_cliques, sizeof(bool)));
+    chkerr(cudaMalloc((void**)&dd.maximal_expansion, sizeof(bool)));
+    chkerr(cudaMalloc((void**)&dd.dumping_cliques, sizeof(bool)));
 
-    chkerr(cudaMemset(device_data.maximal_expansion, false, sizeof(bool)));
-    chkerr(cudaMemset(device_data.dumping_cliques, false, sizeof(bool)));
+    chkerr(cudaMemset(dd.maximal_expansion, false, sizeof(bool)));
+    chkerr(cudaMemset(dd.dumping_cliques, false, sizeof(bool)));
 
-    chkerr(cudaMalloc((void**)&device_data.minimum_degree_ratio, sizeof(double)));
-    chkerr(cudaMalloc((void**)&device_data.minimum_degrees, sizeof(int) * (input_graph.number_of_vertices + 1)));
-    chkerr(cudaMalloc((void**)&device_data.minimum_clique_size, sizeof(int)));
+    chkerr(cudaMalloc((void**)&dd.minimum_degree_ratio, sizeof(double)));
+    chkerr(cudaMalloc((void**)&dd.minimum_degrees, sizeof(int) * (input_graph.number_of_vertices + 1)));
+    chkerr(cudaMalloc((void**)&dd.minimum_clique_size, sizeof(int)));
 
-    chkerr(cudaMemcpy(device_data.minimum_degree_ratio, &minimum_degree_ratio, sizeof(double), cudaMemcpyHostToDevice));
-    chkerr(cudaMemcpy(device_data.minimum_degrees, minimum_degrees, sizeof(int) * (input_graph.number_of_vertices + 1), cudaMemcpyHostToDevice));
-    chkerr(cudaMemcpy(device_data.minimum_clique_size, &minimum_clique_size, sizeof(int), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(dd.minimum_degree_ratio, &minimum_degree_ratio, sizeof(double), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(dd.minimum_degrees, minimum_degrees, sizeof(int) * (input_graph.number_of_vertices + 1), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(dd.minimum_clique_size, &minimum_clique_size, sizeof(int), cudaMemcpyHostToDevice));
 
-    chkerr(cudaMalloc((void**)&device_data.total_tasks, sizeof(int)));
+    chkerr(cudaMalloc((void**)&dd.total_tasks, sizeof(int)));
 
-    chkerr(cudaMemset(device_data.total_tasks, 0, sizeof(int)));
+    chkerr(cudaMemset(dd.total_tasks, 0, sizeof(int)));
 
     // CPU CLIQUES
     host_cliques.cliques_count = new uint64_t;
@@ -616,35 +625,35 @@ void allocate_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& ho
     (*(host_cliques.cliques_count)) = 0;
 
     // GPU CLIQUES
-    chkerr(cudaMalloc((void**)&device_data.cliques_count, sizeof(uint64_t)));
-    chkerr(cudaMalloc((void**)&device_data.cliques_vertex, sizeof(int) * CLIQUES_SIZE));
-    chkerr(cudaMalloc((void**)&device_data.cliques_offset, sizeof(uint64_t) * CLIQUES_OFFSET_SIZE));
+    chkerr(cudaMalloc((void**)&dd.cliques_count, sizeof(uint64_t)));
+    chkerr(cudaMalloc((void**)&dd.cliques_vertex, sizeof(int) * CLIQUES_SIZE));
+    chkerr(cudaMalloc((void**)&dd.cliques_offset, sizeof(uint64_t) * CLIQUES_OFFSET_SIZE));
 
-    chkerr(cudaMemset(device_data.cliques_offset, 0, sizeof(uint64_t)));
-    chkerr(cudaMemset(device_data.cliques_count, 0, sizeof(uint64_t)));
+    chkerr(cudaMemset(dd.cliques_offset, 0, sizeof(uint64_t)));
+    chkerr(cudaMemset(dd.cliques_count, 0, sizeof(uint64_t)));
 
-    chkerr(cudaMalloc((void**)&device_data.wcliques_count, sizeof(uint64_t) * number_of_warps));
-    chkerr(cudaMalloc((void**)&device_data.wcliques_offset, (sizeof(uint64_t)* WCLIQUES_OFFSET_SIZE)* number_of_warps));
-    chkerr(cudaMalloc((void**)&device_data.wcliques_vertex, (sizeof(int) * WCLIQUES_SIZE) * number_of_warps));
+    chkerr(cudaMalloc((void**)&dd.wcliques_count, sizeof(uint64_t) * number_of_warps));
+    chkerr(cudaMalloc((void**)&dd.wcliques_offset, (sizeof(uint64_t)* WCLIQUES_OFFSET_SIZE)* number_of_warps));
+    chkerr(cudaMalloc((void**)&dd.wcliques_vertex, (sizeof(int) * WCLIQUES_SIZE) * number_of_warps));
 
-    chkerr(cudaMemset(device_data.wcliques_offset, 0, (sizeof(uint64_t)* WCLIQUES_OFFSET_SIZE)* number_of_warps));
-    chkerr(cudaMemset(device_data.wcliques_count, 0, sizeof(uint64_t)* number_of_warps));
+    chkerr(cudaMemset(dd.wcliques_offset, 0, (sizeof(uint64_t)* WCLIQUES_OFFSET_SIZE)* number_of_warps));
+    chkerr(cudaMemset(dd.wcliques_count, 0, sizeof(uint64_t)* number_of_warps));
 
-    chkerr(cudaMalloc((void**)&device_data.total_cliques, sizeof(int)));
+    chkerr(cudaMalloc((void**)&dd.total_cliques, sizeof(int)));
 
-    chkerr(cudaMemset(device_data.total_cliques, 0, sizeof(int)));
+    chkerr(cudaMemset(dd.total_cliques, 0, sizeof(int)));
 
-    chkerr(cudaMalloc((void**)&device_data.buffer_offset_start, sizeof(uint64_t)));
-    chkerr(cudaMalloc((void**)&device_data.buffer_start, sizeof(uint64_t)));
-    chkerr(cudaMalloc((void**)&device_data.cliques_offset_start, sizeof(uint64_t)));
-    chkerr(cudaMalloc((void**)&device_data.cliques_start, sizeof(uint64_t)));
+    chkerr(cudaMalloc((void**)&dd.buffer_offset_start, sizeof(uint64_t)));
+    chkerr(cudaMalloc((void**)&dd.buffer_start, sizeof(uint64_t)));
+    chkerr(cudaMalloc((void**)&dd.cliques_offset_start, sizeof(uint64_t)));
+    chkerr(cudaMalloc((void**)&dd.cliques_start, sizeof(uint64_t)));
 
     // DEBUG
-    chkerr(cudaMalloc((void**)&device_data.debug, sizeof(bool)));
-    chkerr(cudaMalloc((void**)&device_data.idebug, sizeof(int)));
+    chkerr(cudaMalloc((void**)&dd.debug, sizeof(bool)));
+    chkerr(cudaMalloc((void**)&dd.idebug, sizeof(int)));
 
-    chkerr(cudaMemset(device_data.debug, false, sizeof(bool)));
-    chkerr(cudaMemset(device_data.idebug, 0, sizeof(int)));
+    chkerr(cudaMemset(dd.debug, false, sizeof(bool)));
+    chkerr(cudaMemset(dd.idebug, 0, sizeof(int)));
 }
 
 // processes 0th and 1st level of expansion
@@ -958,23 +967,23 @@ void initialize_tasks(CPU_Graph& graph, CPU_Data& host_data)
     delete old_vertices;
 }
 
-void move_to_gpu(CPU_Data& host_data, GPU_Data& device_data)
+void move_to_gpu(CPU_Data& host_data, GPU_Data& dd)
 {
-    cudaMemcpy(device_data.tasks1_count, host_data.tasks1_count, sizeof(uint64_t), cudaMemcpyHostToDevice);
-    cudaMemcpy(device_data.tasks1_offset, host_data.tasks1_offset, (EXPAND_THRESHOLD + 1) * sizeof(uint64_t), cudaMemcpyHostToDevice);
-    cudaMemcpy(device_data.tasks1_vertices, host_data.tasks1_vertices, (TASKS_SIZE) * sizeof(Vertex), cudaMemcpyHostToDevice);
+    cudaMemcpy(dd.tasks1_count, host_data.tasks1_count, sizeof(uint64_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(dd.tasks1_offset, host_data.tasks1_offset, (EXPAND_THRESHOLD + 1) * sizeof(uint64_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(dd.tasks1_vertices, host_data.tasks1_vertices, (TASKS_SIZE) * sizeof(Vertex), cudaMemcpyHostToDevice);
 
-    cudaMemcpy(device_data.buffer_count, host_data.buffer_count, sizeof(uint64_t), cudaMemcpyHostToDevice);
-    cudaMemcpy(device_data.buffer_offset, host_data.buffer_offset, (BUFFER_OFFSET_SIZE) * sizeof(uint64_t), cudaMemcpyHostToDevice);
-    cudaMemcpy(device_data.buffer_vertices, host_data.buffer_vertices, (BUFFER_SIZE) * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(dd.buffer_count, host_data.buffer_count, sizeof(uint64_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(dd.buffer_offset, host_data.buffer_offset, (BUFFER_OFFSET_SIZE) * sizeof(uint64_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(dd.buffer_vertices, host_data.buffer_vertices, (BUFFER_SIZE) * sizeof(int), cudaMemcpyHostToDevice);
 }
 
-void dump_cliques(CPU_Cliques& host_cliques, GPU_Data& device_data, ofstream& temp_results)
+void dump_cliques(CPU_Cliques& host_cliques, GPU_Data& dd, ofstream& temp_results)
 {
     // gpu cliques to cpu cliques
-    chkerr(cudaMemcpy(host_cliques.cliques_count, device_data.cliques_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(host_cliques.cliques_offset, device_data.cliques_offset, sizeof(uint64_t) * CLIQUES_OFFSET_SIZE, cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(host_cliques.cliques_vertex, device_data.cliques_vertex, sizeof(int) * CLIQUES_SIZE, cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(host_cliques.cliques_count, dd.cliques_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(host_cliques.cliques_offset, dd.cliques_offset, sizeof(uint64_t) * CLIQUES_OFFSET_SIZE, cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(host_cliques.cliques_vertex, dd.cliques_vertex, sizeof(int) * CLIQUES_SIZE, cudaMemcpyDeviceToHost));
     cudaDeviceSynchronize();
 
     // DEBUG
@@ -990,18 +999,18 @@ void dump_cliques(CPU_Cliques& host_cliques, GPU_Data& device_data, ofstream& te
         temp_results << "\n";
     }
     ((*host_cliques.cliques_count)) = 0;
-    cudaMemset(device_data.cliques_count, 0, sizeof(uint64_t));
+    cudaMemset(dd.cliques_count, 0, sizeof(uint64_t));
 }
 
-void free_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& host_cliques)
+void free_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_cliques)
 {
     // GPU GRAPH
-    chkerr(cudaFree(device_data.number_of_vertices));
-    chkerr(cudaFree(device_data.number_of_edges));
-    chkerr(cudaFree(device_data.onehop_neighbors));
-    chkerr(cudaFree(device_data.onehop_offsets));
-    chkerr(cudaFree(device_data.twohop_neighbors));
-    chkerr(cudaFree(device_data.twohop_offsets));
+    chkerr(cudaFree(dd.number_of_vertices));
+    chkerr(cudaFree(dd.number_of_edges));
+    chkerr(cudaFree(dd.onehop_neighbors));
+    chkerr(cudaFree(dd.onehop_offsets));
+    chkerr(cudaFree(dd.twohop_neighbors));
+    chkerr(cudaFree(dd.twohop_offsets));
 
     // CPU DATA
     delete host_data.tasks1_count;
@@ -1016,34 +1025,34 @@ void free_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& host_c
     delete host_data.dumping_cliques;
 
     // GPU DATA
-    chkerr(cudaFree(device_data.current_level));
+    chkerr(cudaFree(dd.current_level));
 
-    chkerr(cudaFree(device_data.tasks1_count));
-    chkerr(cudaFree(device_data.tasks1_offset));
-    chkerr(cudaFree(device_data.tasks1_vertices));
+    chkerr(cudaFree(dd.tasks1_count));
+    chkerr(cudaFree(dd.tasks1_offset));
+    chkerr(cudaFree(dd.tasks1_vertices));
 
-    chkerr(cudaFree(device_data.tasks2_count));
-    chkerr(cudaFree(device_data.tasks2_offset));
-    chkerr(cudaFree(device_data.tasks2_vertices));
+    chkerr(cudaFree(dd.tasks2_count));
+    chkerr(cudaFree(dd.tasks2_offset));
+    chkerr(cudaFree(dd.tasks2_vertices));
 
-    chkerr(cudaFree(device_data.buffer_count));
-    chkerr(cudaFree(device_data.buffer_offset));
-    chkerr(cudaFree(device_data.buffer_vertices));
+    chkerr(cudaFree(dd.buffer_count));
+    chkerr(cudaFree(dd.buffer_offset));
+    chkerr(cudaFree(dd.buffer_vertices));
 
-    chkerr(cudaFree(device_data.wtasks_count));
-    chkerr(cudaFree(device_data.wtasks_offset));
-    chkerr(cudaFree(device_data.wtasks_vertices));
+    chkerr(cudaFree(dd.wtasks_count));
+    chkerr(cudaFree(dd.wtasks_offset));
+    chkerr(cudaFree(dd.wtasks_vertices));
 
-    chkerr(cudaFree(device_data.wvertices));
+    chkerr(cudaFree(dd.wvertices));
 
-    chkerr(cudaFree(device_data.maximal_expansion));
-    chkerr(cudaFree(device_data.dumping_cliques));
+    chkerr(cudaFree(dd.maximal_expansion));
+    chkerr(cudaFree(dd.dumping_cliques));
 
-    chkerr(cudaFree(device_data.minimum_degree_ratio));
-    chkerr(cudaFree(device_data.minimum_degrees));
-    chkerr(cudaFree(device_data.minimum_clique_size));
+    chkerr(cudaFree(dd.minimum_degree_ratio));
+    chkerr(cudaFree(dd.minimum_degrees));
+    chkerr(cudaFree(dd.minimum_clique_size));
 
-    chkerr(cudaFree(device_data.total_tasks));
+    chkerr(cudaFree(dd.total_tasks));
 
     // CPU CLIQUES
     delete host_cliques.cliques_count;
@@ -1051,22 +1060,22 @@ void free_memory(CPU_Data& host_data, GPU_Data& device_data, CPU_Cliques& host_c
     delete host_cliques.cliques_offset;
 
     // GPU CLIQUES
-    chkerr(cudaFree(device_data.cliques_count));
-    chkerr(cudaFree(device_data.cliques_vertex));
-    chkerr(cudaFree(device_data.cliques_offset));
+    chkerr(cudaFree(dd.cliques_count));
+    chkerr(cudaFree(dd.cliques_vertex));
+    chkerr(cudaFree(dd.cliques_offset));
 
-    chkerr(cudaFree(device_data.wcliques_count));
-    chkerr(cudaFree(device_data.wcliques_vertex));
-    chkerr(cudaFree(device_data.wcliques_offset));
+    chkerr(cudaFree(dd.wcliques_count));
+    chkerr(cudaFree(dd.wcliques_vertex));
+    chkerr(cudaFree(dd.wcliques_offset));
 
-    chkerr(cudaFree(device_data.buffer_offset_start));
-    chkerr(cudaFree(device_data.buffer_start));
-    chkerr(cudaFree(device_data.cliques_offset_start));
-    chkerr(cudaFree(device_data.cliques_start));
+    chkerr(cudaFree(dd.buffer_offset_start));
+    chkerr(cudaFree(dd.buffer_start));
+    chkerr(cudaFree(dd.cliques_offset_start));
+    chkerr(cudaFree(dd.cliques_start));
 
     //DEBUG
-    chkerr(cudaFree(device_data.debug));
-    chkerr(cudaFree(device_data.idebug));
+    chkerr(cudaFree(dd.debug));
+    chkerr(cudaFree(dd.idebug));
 }
 
 
@@ -1183,7 +1192,7 @@ int sort_vertices(const void* a, const void* b)
     return 0;
 }
 
-int get_mindeg(int clique_size) {
+inline int get_mindeg(int clique_size) {
     if (clique_size < minimum_clique_size) {
         return minimum_degrees[minimum_clique_size];
     }
@@ -1192,7 +1201,7 @@ int get_mindeg(int clique_size) {
     }
 }
 
-bool cand_isvalid(Vertex& vertex, int clique_size) {
+inline bool cand_isvalid(Vertex& vertex, int clique_size) {
     if (vertex.indeg + vertex.exdeg < minimum_degrees[minimum_clique_size]) {
         return false;
     }
@@ -1242,7 +1251,7 @@ void print_CPU_Graph(CPU_Graph& host_graph) {
     cout << endl << endl;
 }
 
-void print_GPU_Graph(GPU_Data& device_data, CPU_Graph& host_graph)
+void print_GPU_Graph(GPU_Data& dd, CPU_Graph& host_graph)
 {
     int* number_of_vertices = new int;
     int* number_of_edges = new int;
@@ -1252,12 +1261,12 @@ void print_GPU_Graph(GPU_Data& device_data, CPU_Graph& host_graph)
     int* twohop_neighbors = new int[host_graph.number_of_twohop_neighbors];
     uint64_t * twohop_offsets = new uint64_t[(host_graph.number_of_vertices)+1];
 
-    chkerr(cudaMemcpy(number_of_vertices, device_data.number_of_vertices, sizeof(int), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(number_of_edges, device_data.number_of_edges, sizeof(int), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(onehop_neighbors, device_data.onehop_neighbors, sizeof(int)*host_graph.number_of_onehop_neighbors, cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(onehop_offsets, device_data.onehop_offsets, sizeof(uint64_t)*(host_graph.number_of_vertices+1), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(twohop_neighbors, device_data.twohop_neighbors, sizeof(int)*host_graph.number_of_twohop_neighbors, cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(twohop_offsets, device_data.twohop_offsets, sizeof(uint64_t)*(host_graph.number_of_vertices+1), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(number_of_vertices, dd.number_of_vertices, sizeof(int), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(number_of_edges, dd.number_of_edges, sizeof(int), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(onehop_neighbors, dd.onehop_neighbors, sizeof(int)*host_graph.number_of_onehop_neighbors, cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(onehop_offsets, dd.onehop_offsets, sizeof(uint64_t)*(host_graph.number_of_vertices+1), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(twohop_neighbors, dd.twohop_neighbors, sizeof(int)*host_graph.number_of_twohop_neighbors, cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(twohop_offsets, dd.twohop_offsets, sizeof(uint64_t)*(host_graph.number_of_vertices+1), cudaMemcpyDeviceToHost));
 
     cout << endl << " --- (GPU_Graph)device_graph details --- " << endl;
     cout << endl << "|V|: " << (*number_of_vertices) << " |E|: " << (*number_of_edges) << endl;
@@ -1345,7 +1354,7 @@ void print_CPU_Data(CPU_Data& host_data)
     cout << endl << endl;
 }
 
-void print_GPU_Data(GPU_Data& device_data)
+void print_GPU_Data(GPU_Data& dd)
 {
     uint64_t* current_level = new uint64_t;
 
@@ -1363,19 +1372,19 @@ void print_GPU_Data(GPU_Data& device_data)
     Vertex* buffer_vertices = new Vertex[BUFFER_SIZE];
 
 
-    chkerr(cudaMemcpy(current_level, device_data.current_level, sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(current_level, dd.current_level, sizeof(uint64_t), cudaMemcpyDeviceToHost));
 
-    chkerr(cudaMemcpy(tasks1_count, device_data.tasks1_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(tasks1_offset, device_data.tasks1_offset, (EXPAND_THRESHOLD + 1) * sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(tasks1_vertices, device_data.tasks1_vertices, (TASKS_SIZE) * sizeof(Vertex), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(tasks1_count, dd.tasks1_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(tasks1_offset, dd.tasks1_offset, (EXPAND_THRESHOLD + 1) * sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(tasks1_vertices, dd.tasks1_vertices, (TASKS_SIZE) * sizeof(Vertex), cudaMemcpyDeviceToHost));
 
-    chkerr(cudaMemcpy(tasks2_count, device_data.tasks2_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(tasks2_offset, device_data.tasks2_offset, (EXPAND_THRESHOLD + 1) * sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(tasks2_vertices, device_data.tasks2_vertices, (TASKS_SIZE) * sizeof(Vertex), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(tasks2_count, dd.tasks2_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(tasks2_offset, dd.tasks2_offset, (EXPAND_THRESHOLD + 1) * sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(tasks2_vertices, dd.tasks2_vertices, (TASKS_SIZE) * sizeof(Vertex), cudaMemcpyDeviceToHost));
 
-    chkerr(cudaMemcpy(buffer_count, device_data.buffer_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(buffer_offset, device_data.buffer_offset, (BUFFER_OFFSET_SIZE) * sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(buffer_vertices, device_data.buffer_vertices, (BUFFER_SIZE) * sizeof(Vertex), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(buffer_count, dd.buffer_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(buffer_offset, dd.buffer_offset, (BUFFER_OFFSET_SIZE) * sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(buffer_vertices, dd.buffer_vertices, (BUFFER_SIZE) * sizeof(Vertex), cudaMemcpyDeviceToHost));
 
     cout << " --- (GPU_Data)device_data details --- " << endl;
     cout << endl << "Tasks1: Level: " << (*current_level) << " Size: " << (*tasks1_count) << endl;
@@ -1474,7 +1483,7 @@ void print_GPU_Data(GPU_Data& device_data)
     delete buffer_vertices;
 }
 
-void print_Data_Sizes(GPU_Data& device_data)
+void print_Data_Sizes(GPU_Data& dd)
 {
     uint64_t* current_level = new uint64_t;
     uint64_t* tasks1_count = new uint64_t;
@@ -1486,15 +1495,15 @@ void print_Data_Sizes(GPU_Data& device_data)
     uint64_t* buffer_size = new uint64_t;
     uint64_t* cliques_size = new uint64_t;
 
-    chkerr(cudaMemcpy(current_level, device_data.current_level, sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(tasks1_count, device_data.tasks1_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(tasks2_count, device_data.tasks2_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(buffer_count, device_data.buffer_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(cliques_count, device_data.cliques_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(tasks1_size, device_data.tasks1_offset + (*tasks1_count), sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(tasks2_size, device_data.tasks2_offset + (*tasks2_count), sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(buffer_size, device_data.buffer_offset + (*buffer_count), sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(cliques_size, device_data.cliques_offset + (*cliques_count), sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(current_level, dd.current_level, sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(tasks1_count, dd.tasks1_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(tasks2_count, dd.tasks2_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(buffer_count, dd.buffer_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(cliques_count, dd.cliques_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(tasks1_size, dd.tasks1_offset + (*tasks1_count), sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(tasks2_size, dd.tasks2_offset + (*tasks2_count), sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(buffer_size, dd.buffer_offset + (*buffer_count), sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(cliques_size, dd.cliques_offset + (*cliques_count), sizeof(uint64_t), cudaMemcpyDeviceToHost));
 
     cout << "L: " << (*current_level) << " T1: " << (*tasks1_count) << " " << (*tasks1_size) << " T2: " << (*tasks2_count) << " " << (*tasks2_size) << " B: " << (*buffer_count) << " " << (*buffer_size) << " C: " << (*cliques_count) << " " << (*cliques_size) << endl;
 
@@ -1509,16 +1518,16 @@ void print_Data_Sizes(GPU_Data& device_data)
     delete cliques_size;
 }
 
-void print_WTask_Buffers(GPU_Data& device_data)
+void print_WTask_Buffers(GPU_Data& dd)
 {
     int warp_count = (NUM_OF_BLOCKS * BLOCK_SIZE) / 32;
     uint64_t* wtasks_count = new uint64_t[warp_count];
     uint64_t* wtasks_offset = new uint64_t[warp_count*WTASKS_OFFSET_SIZE];
     Vertex* wtasks_vertices = new Vertex[warp_count*WTASKS_SIZE];
 
-    chkerr(cudaMemcpy(wtasks_count, device_data.wtasks_count, sizeof(uint64_t)*warp_count, cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(wtasks_offset, device_data.wtasks_offset, sizeof(uint64_t) * (warp_count*WTASKS_OFFSET_SIZE), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(wtasks_vertices, device_data.wtasks_vertices, sizeof(Vertex) * (warp_count*WTASKS_SIZE), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(wtasks_count, dd.wtasks_count, sizeof(uint64_t)*warp_count, cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(wtasks_offset, dd.wtasks_offset, sizeof(uint64_t) * (warp_count*WTASKS_OFFSET_SIZE), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(wtasks_vertices, dd.wtasks_vertices, sizeof(Vertex) * (warp_count*WTASKS_SIZE), cudaMemcpyDeviceToHost));
 
     cout << endl << " --- Warp Task Buffers details --- " << endl;
     for (int i = 0; i < warp_count; i++) {
@@ -1562,16 +1571,16 @@ void print_WTask_Buffers(GPU_Data& device_data)
     delete wtasks_vertices;
 }
 
-void print_WClique_Buffers(GPU_Data& device_data)
+void print_WClique_Buffers(GPU_Data& dd)
 {
     int warp_count = (NUM_OF_BLOCKS * BLOCK_SIZE) / 32;
     uint64_t* wcliques_count = new uint64_t[warp_count];
     uint64_t* wcliques_offset = new uint64_t[warp_count * WCLIQUES_OFFSET_SIZE];
     int* wcliques_vertex = new int[warp_count * WCLIQUES_SIZE];
 
-    chkerr(cudaMemcpy(wcliques_count, device_data.wcliques_count, sizeof(uint64_t) * warp_count, cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(wcliques_offset, device_data.wcliques_offset, sizeof(uint64_t) * (warp_count * WTASKS_OFFSET_SIZE), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(wcliques_vertex, device_data.wcliques_vertex, sizeof(int) * (warp_count * WTASKS_SIZE), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(wcliques_count, dd.wcliques_count, sizeof(uint64_t) * warp_count, cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(wcliques_offset, dd.wcliques_offset, sizeof(uint64_t) * (warp_count * WTASKS_OFFSET_SIZE), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(wcliques_vertex, dd.wcliques_vertex, sizeof(int) * (warp_count * WTASKS_SIZE), cudaMemcpyDeviceToHost));
 
     cout << endl << " --- Warp Clique Buffers details --- " << endl;
     for (int i = 0; i < warp_count; i++) {
@@ -1595,15 +1604,15 @@ void print_WClique_Buffers(GPU_Data& device_data)
     delete wcliques_vertex;
 }
 
-void print_GPU_Cliques(GPU_Data& device_data)
+void print_GPU_Cliques(GPU_Data& dd)
 {
     uint64_t* cliques_count = new uint64_t;
     uint64_t* cliques_offset = new uint64_t[CLIQUES_OFFSET_SIZE];
     int* cliques_vertex = new int[CLIQUES_SIZE];
 
-    chkerr(cudaMemcpy(cliques_count, device_data.cliques_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(cliques_offset, device_data.cliques_offset, sizeof(uint64_t) * CLIQUES_OFFSET_SIZE, cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(cliques_vertex, device_data.cliques_vertex, sizeof(int) * CLIQUES_SIZE, cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(cliques_count, dd.cliques_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(cliques_offset, dd.cliques_offset, sizeof(uint64_t) * CLIQUES_OFFSET_SIZE, cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(cliques_vertex, dd.cliques_vertex, sizeof(int) * CLIQUES_SIZE, cudaMemcpyDeviceToHost));
 
     cout << endl << " --- (GPU_Cliques)device_cliques details --- " << endl;
     cout << endl << "Cliques: " << "Size: " << (*cliques_count) << endl;
@@ -1682,374 +1691,146 @@ void print_vertices(Vertex* vertices, int size)
 
 // --- DEVICE KERNELS ---
 
-__global__ void expand_level(GPU_Data device_data)
+__global__ void expand_level(GPU_Data dd)
 {
     // data is stored in data structures to reduce the number of variables that need to be passed to methods
-    __shared__ Warp_Data warp_data;
-    Local_Data local_data;
+    __shared__ Warp_Data wd;
+    Local_Data ld;
 
     // helper variables, not passed through to any methods
-    int pvertexid;
-    bool failed_found;
-    bool lookahead_sucess;
-    int number_of_removed_candidates;
+    int method_return;
 
     // initialize variables
-    local_data.idx = (blockIdx.x * blockDim.x + threadIdx.x);
-    local_data.warp_in_block_idx = ((local_data.idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE));
+    ld.idx = (blockIdx.x * blockDim.x + threadIdx.x);
+    ld.warp_in_block_idx = ((ld.idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE));
 
-    if ((*(device_data.current_level)) % 2 == 1) {
-        local_data.read_count = device_data.tasks1_count;
-        local_data.read_offsets = device_data.tasks1_offset;
-        local_data.read_vertices = device_data.tasks1_vertices;
+    if ((*(dd.current_level)) % 2 == 1) {
+        ld.read_count = dd.tasks1_count;
+        ld.read_offsets = dd.tasks1_offset;
+        ld.read_vertices = dd.tasks1_vertices;
     } else {
-        local_data.read_count = device_data.tasks2_count;
-        local_data.read_offsets = device_data.tasks2_offset;
-        local_data.read_vertices = device_data.tasks2_vertices;
+        ld.read_count = dd.tasks2_count;
+        ld.read_offsets = dd.tasks2_offset;
+        ld.read_vertices = dd.tasks2_vertices;
     }
 
 
 
     // --- CURRENT LEVEL ---
-    for (int i = (local_data.idx / WARP_SIZE); i < (*(local_data.read_count)); i += ((NUM_OF_BLOCKS * BLOCK_SIZE) / WARP_SIZE))
+    for (int i = (ld.idx / WARP_SIZE); i < (*(ld.read_count)); i += ((NUM_OF_BLOCKS * BLOCK_SIZE) / WARP_SIZE))
     {
         // get information of vertices being handled within tasks
-        if ((local_data.idx % WARP_SIZE) == 0) {
-            warp_data.start[local_data.warp_in_block_idx] = local_data.read_offsets[i];
-            warp_data.end[local_data.warp_in_block_idx] = local_data.read_offsets[i + 1];
-            warp_data.tot_vert[local_data.warp_in_block_idx] = warp_data.end[local_data.warp_in_block_idx] - warp_data.start[local_data.warp_in_block_idx];
-            warp_data.num_mem[local_data.warp_in_block_idx] = 0;
-            for (uint64_t j = warp_data.start[local_data.warp_in_block_idx]; j < warp_data.end[local_data.warp_in_block_idx]; j++) {
-                if (local_data.read_vertices[j].label == 1) {
-                    warp_data.num_mem[local_data.warp_in_block_idx]++;
+        if ((ld.idx % WARP_SIZE) == 0) {
+            wd.start[ld.warp_in_block_idx] = ld.read_offsets[i];
+            wd.end[ld.warp_in_block_idx] = ld.read_offsets[i + 1];
+            wd.tot_vert[ld.warp_in_block_idx] = wd.end[ld.warp_in_block_idx] - wd.start[ld.warp_in_block_idx];
+            wd.num_mem[ld.warp_in_block_idx] = 0;
+            for (uint64_t j = wd.start[ld.warp_in_block_idx]; j < wd.end[ld.warp_in_block_idx]; j++) {
+                if (ld.read_vertices[j].label == 1) {
+                    wd.num_mem[ld.warp_in_block_idx]++;
                 } else {
                     break;
                 }
             }
-            warp_data.num_cand[local_data.warp_in_block_idx] = warp_data.tot_vert[local_data.warp_in_block_idx] - warp_data.num_mem[local_data.warp_in_block_idx];
-            warp_data.expansions[local_data.warp_in_block_idx] = warp_data.num_cand[local_data.warp_in_block_idx];
+            wd.num_cand[ld.warp_in_block_idx] = wd.tot_vert[ld.warp_in_block_idx] - wd.num_mem[ld.warp_in_block_idx];
+            wd.expansions[ld.warp_in_block_idx] = wd.num_cand[ld.warp_in_block_idx];
         }
         __syncwarp();
 
 
 
         // LOOKAHEAD PRUNING
-        lookahead_sucess = true;
-        for (int j = (local_data.idx % WARP_SIZE); j < warp_data.tot_vert[local_data.warp_in_block_idx]; j += WARP_SIZE) {
-            if (local_data.read_vertices[warp_data.start[local_data.warp_in_block_idx] + j].lvl2adj != (warp_data.tot_vert[local_data.warp_in_block_idx] - 1) ||
-                local_data.read_vertices[warp_data.start[local_data.warp_in_block_idx] + j].indeg + local_data.read_vertices[warp_data.start[local_data.warp_in_block_idx] + j].exdeg <
-                device_data.minimum_degrees[warp_data.tot_vert[local_data.warp_in_block_idx]]) {
-                lookahead_sucess = false;
-                break;
-            }
-        }
-        lookahead_sucess = !(__any_sync(0xFFFFFFFF, !lookahead_sucess));
-
-        if (lookahead_sucess) {
-            // write to cliques
-            uint64_t start_write = (WCLIQUES_SIZE * (local_data.idx / WARP_SIZE)) + device_data.wcliques_offset[(WCLIQUES_OFFSET_SIZE * (local_data.idx / WARP_SIZE)) +
-                (device_data.wcliques_count[(local_data.idx / WARP_SIZE)])];
-            for (int j = (local_data.idx % WARP_SIZE); j < warp_data.tot_vert[local_data.warp_in_block_idx]; j += WARP_SIZE) {
-                device_data.wcliques_vertex[start_write + j] = local_data.read_vertices[warp_data.start[local_data.warp_in_block_idx] + j].vertexid;
-            }
-            if ((local_data.idx % WARP_SIZE) == 0) {
-                (device_data.wcliques_count[(local_data.idx / WARP_SIZE)])++;
-                device_data.wcliques_offset[(WCLIQUES_OFFSET_SIZE * (local_data.idx / WARP_SIZE)) + (device_data.wcliques_count[(local_data.idx / WARP_SIZE)])] = start_write - (WCLIQUES_SIZE * (local_data.idx / WARP_SIZE)) +
-                    warp_data.tot_vert[local_data.warp_in_block_idx];
-            }
+        method_return = lookahead_pruning(dd, wd, ld);
+        if (method_return) {
             continue;
         }
 
 
 
         // --- NEXT LEVEL ---
-        for (int j = 0; j < warp_data.expansions[local_data.warp_in_block_idx]; j++)
+        for (int j = 0; j < wd.expansions[ld.warp_in_block_idx]; j++)
         {
 
 
-
+            // UNSURE - almost certain we don't need to check for clique if failed found, but work through with Guo
             // REMOVE ONE VERTEX
             if (j > 0) {
-                if ((local_data.idx % WARP_SIZE) == 0) {
-                    warp_data.num_cand[local_data.warp_in_block_idx]--;
-                    warp_data.tot_vert[local_data.warp_in_block_idx]--;
+                method_return = remove_one_vertex(dd, wd, ld);
+                if (method_return) {
+                    continue;
                 }
-                __syncwarp();
-
-                pvertexid = local_data.read_vertices[warp_data.start[local_data.warp_in_block_idx] + warp_data.tot_vert[local_data.warp_in_block_idx]].vertexid;
-                for (int k = (local_data.idx % WARP_SIZE); k < warp_data.tot_vert[local_data.warp_in_block_idx]; k += WARP_SIZE) {
-                    if (device_bsearch_array(device_data.onehop_neighbors + device_data.onehop_offsets[pvertexid], device_data.onehop_offsets[pvertexid + 1] - device_data.onehop_offsets[pvertexid],
-                        local_data.read_vertices[warp_data.start[local_data.warp_in_block_idx] + k].vertexid) != -1) {
-                        local_data.read_vertices[warp_data.start[local_data.warp_in_block_idx] + k].exdeg--;
-                    }
-
-                    if (device_bsearch_array(device_data.twohop_neighbors + device_data.twohop_offsets[pvertexid], device_data.twohop_offsets[pvertexid + 1] - device_data.twohop_offsets[pvertexid],
-                        local_data.read_vertices[warp_data.start[local_data.warp_in_block_idx] + k].vertexid) != -1) {
-                        local_data.read_vertices[warp_data.start[local_data.warp_in_block_idx] + k].lvl2adj--;
-                    }
-                }
-                __syncwarp();
-            }
-
-            // check for failed vertices
-            failed_found = false;
-            for (int k = (local_data.idx % WARP_SIZE); k < warp_data.num_mem[local_data.warp_in_block_idx]; k += WARP_SIZE) {
-                if (!device_vert_isextendable(local_data.read_vertices[warp_data.start[local_data.warp_in_block_idx] + k], 
-                    warp_data.num_mem[local_data.warp_in_block_idx], device_data)) {
-                    failed_found = true;
-                    break;
-                }
-
-            }
-            failed_found = __any_sync(0xFFFFFFFF, failed_found);
-            if (failed_found) {
-                continue;
             }
 
 
 
             // INITIALIZE NEW VERTICES
-            if ((local_data.idx % WARP_SIZE) == 0) {
-                warp_data.number_of_members[local_data.warp_in_block_idx] = warp_data.num_mem[local_data.warp_in_block_idx];
-                warp_data.number_of_candidates[local_data.warp_in_block_idx] = warp_data.num_cand[local_data.warp_in_block_idx];
-                warp_data.total_vertices[local_data.warp_in_block_idx] = warp_data.tot_vert[local_data.warp_in_block_idx];
+            if ((ld.idx % WARP_SIZE) == 0) {
+                wd.number_of_members[ld.warp_in_block_idx] = wd.num_mem[ld.warp_in_block_idx];
+                wd.number_of_candidates[ld.warp_in_block_idx] = wd.num_cand[ld.warp_in_block_idx];
+                wd.total_vertices[ld.warp_in_block_idx] = wd.tot_vert[ld.warp_in_block_idx];
             }
             __syncwarp();
 
             // select whether to store vertices in global or shared memory based on size
-            if (warp_data.total_vertices[local_data.warp_in_block_idx] <= VERTICES_SIZE) {
-                local_data.vertices = warp_data.shared_vertices + (VERTICES_SIZE * local_data.warp_in_block_idx);
+            if (wd.total_vertices[ld.warp_in_block_idx] <= VERTICES_SIZE) {
+                ld.vertices = wd.shared_vertices + (VERTICES_SIZE * ld.warp_in_block_idx);
             } else {
-                local_data.vertices = device_data.wvertices + (WVERTICES_SIZE * (local_data.idx / WARP_SIZE));
+                ld.vertices = dd.wvertices + (WVERTICES_SIZE * (ld.idx / WARP_SIZE));
             }
 
-            for (int k = (local_data.idx % WARP_SIZE); k < warp_data.total_vertices[local_data.warp_in_block_idx]; k += WARP_SIZE) {
-                local_data.vertices[k] = local_data.read_vertices[warp_data.start[local_data.warp_in_block_idx] + k];
+            for (int k = (ld.idx % WARP_SIZE); k < wd.total_vertices[ld.warp_in_block_idx]; k += WARP_SIZE) {
+                ld.vertices[k] = ld.read_vertices[wd.start[ld.warp_in_block_idx] + k];
             }
 
 
 
             // ADD ONE VERTEX
-            if ((local_data.idx % WARP_SIZE) == 0) {
-                local_data.vertices[warp_data.total_vertices[local_data.warp_in_block_idx] - 1].label = 1;
-                warp_data.number_of_members[local_data.warp_in_block_idx]++;
-                warp_data.number_of_candidates[local_data.warp_in_block_idx]--;
-            }
-            __syncwarp();
-
-            // update the exdeg and indeg of all vertices adj to the vertex just added to the vertex set
-            pvertexid = local_data.vertices[warp_data.total_vertices[local_data.warp_in_block_idx] - 1].vertexid;
-            for (int k = (local_data.idx % WARP_SIZE); k < warp_data.total_vertices[local_data.warp_in_block_idx]; k += WARP_SIZE) {
-                if (device_bsearch_array(device_data.onehop_neighbors + device_data.onehop_offsets[local_data.vertices[k].vertexid], device_data.onehop_offsets[local_data.vertices[k].vertexid + 1] -
-                    device_data.onehop_offsets[local_data.vertices[k].vertexid], pvertexid) != -1) {
-                    local_data.vertices[k].exdeg--;
-                    local_data.vertices[k].indeg++;
-                }
-            }
-            __syncwarp();
-
-            // sort new vertices putting just added vertex at end of all vertices in x
-            device_sort(local_data.vertices + warp_data.number_of_members[local_data.warp_in_block_idx] - 1, warp_data.number_of_candidates[local_data.warp_in_block_idx] + 1,
-                (local_data.idx% WARP_SIZE));
-
-
-
-            // --- DIAMETER PRUNING ---
-            number_of_removed_candidates = 0;
-            for (int k = warp_data.number_of_members[local_data.warp_in_block_idx] + (local_data.idx % WARP_SIZE); k < warp_data.total_vertices[local_data.warp_in_block_idx];
-                k += WARP_SIZE) {
-                if (device_bsearch_array(device_data.twohop_neighbors + device_data.twohop_offsets[pvertexid], device_data.twohop_offsets[pvertexid + 1] - device_data.twohop_offsets[pvertexid], local_data.vertices[k].vertexid) == -1) {
-                    local_data.vertices[k].label = -1;
-                    number_of_removed_candidates++;
-                }
-            }
-            for (int k = 1; k < 32; k *= 2) {
-                number_of_removed_candidates += __shfl_xor_sync(0xFFFFFFFF, number_of_removed_candidates, k);
-            }
-            device_sort(local_data.vertices + warp_data.number_of_members[local_data.warp_in_block_idx], warp_data.number_of_candidates[local_data.warp_in_block_idx],
-                (local_data.idx % WARP_SIZE));
-
-            // update exdeg of vertices connected to removed cands
-            if (warp_data.total_vertices[local_data.warp_in_block_idx] - number_of_removed_candidates > number_of_removed_candidates) {
-                for (int k = (local_data.idx % WARP_SIZE); k < warp_data.total_vertices[local_data.warp_in_block_idx] - number_of_removed_candidates; k += WARP_SIZE) {
-                    pvertexid = local_data.vertices[k].vertexid;
-                    for (int l = warp_data.total_vertices[local_data.warp_in_block_idx] - number_of_removed_candidates; l <
-                        warp_data.total_vertices[local_data.warp_in_block_idx]; l++) {
-                        if (device_bsearch_array(device_data.onehop_neighbors + device_data.onehop_offsets[local_data.vertices[l].vertexid], device_data.onehop_offsets[local_data.vertices[l].vertexid + 1] -
-                            device_data.onehop_offsets[local_data.vertices[l].vertexid], pvertexid) != -1) {
-                            local_data.vertices[k].exdeg--;
-                        }
-
-                        if (device_bsearch_array(device_data.twohop_neighbors + device_data.twohop_offsets[local_data.vertices[l].vertexid], device_data.twohop_offsets[local_data.vertices[l].vertexid + 1] -
-                            device_data.twohop_offsets[local_data.vertices[l].vertexid], pvertexid) != -1) {
-                            local_data.vertices[k].lvl2adj--;
-                        }
-                    }
-                }
-                __syncwarp();
-            }
-            else {
-                for (int k = 0; k < warp_data.total_vertices[local_data.warp_in_block_idx] - number_of_removed_candidates; k++) {
-                    pvertexid = local_data.vertices[k].vertexid;
-                    for (int l = warp_data.total_vertices[local_data.warp_in_block_idx] - number_of_removed_candidates + (local_data.idx % WARP_SIZE); l < warp_data.total_vertices[((local_data.idx / WARP_SIZE) %
-                        (BLOCK_SIZE / WARP_SIZE))]; l += WARP_SIZE) {
-                        if (device_bsearch_array(device_data.onehop_neighbors + device_data.onehop_offsets[local_data.vertices[l].vertexid], device_data.onehop_offsets[local_data.vertices[l].vertexid + 1] -
-                            device_data.onehop_offsets[local_data.vertices[l].vertexid], pvertexid) != -1) {
-                            local_data.vertices[k].exdeg--;
-                        }
-
-                        if (device_bsearch_array(device_data.twohop_neighbors + device_data.twohop_offsets[local_data.vertices[l].vertexid], device_data.twohop_offsets[local_data.vertices[l].vertexid + 1] -
-                            device_data.twohop_offsets[local_data.vertices[l].vertexid], pvertexid) != -1) {
-                            local_data.vertices[k].lvl2adj--;
-                        }
-                    }
-                    __syncwarp();
-                }
-            }
-            if ((local_data.idx % WARP_SIZE) == 0) {
-                warp_data.total_vertices[local_data.warp_in_block_idx] -= number_of_removed_candidates;
-                warp_data.number_of_candidates[local_data.warp_in_block_idx] -= number_of_removed_candidates;
-            }
-            __syncwarp();
-
-            // continue if not enough vertices after pruning
-            if (warp_data.total_vertices[local_data.warp_in_block_idx] < (*(device_data.minimum_clique_size))) {
-                return;
-            }
-
-
-
-            // DEGREE BASED PRUNING
-            do
-            {
-                // calculate lower and upper bounds for vertices
-                //calculate_LU_bounds(device_data, warp_data, local_data);
-
-                if (warp_data.invalid_bounds[local_data.warp_in_block_idx]) {
-                    break;
-                }
-
-                // check for failed vertices
-                failed_found = false;
-                for (int k = (local_data.idx % WARP_SIZE); k < warp_data.number_of_members[local_data.warp_in_block_idx]; k += WARP_SIZE) {
-                    if (!device_vert_isextendable(local_data.vertices[k], warp_data.number_of_members[local_data.warp_in_block_idx], device_data)) {
-                        failed_found = true;
-                        break;
-                    }
-
-                }
-                failed_found = __any_sync(0xFFFFFFFF, failed_found);
-                if (failed_found) {
-                    break;
-                }
-
-                // remove cands that do not meet the deg requirement
-                number_of_removed_candidates = 0;
-                for (int k = warp_data.number_of_members[local_data.warp_in_block_idx] + (local_data.idx % WARP_SIZE); k < warp_data.total_vertices[local_data.warp_in_block_idx];
-                    k += WARP_SIZE) {
-                    if (!device_cand_isvalid(local_data.vertices[k], warp_data.number_of_members[local_data.warp_in_block_idx], device_data)) {
-                        local_data.vertices[k].label = -1;
-                        number_of_removed_candidates++;
-                    }
-                }
-                for (int k = 1; k < 32; k *= 2) {
-                    number_of_removed_candidates += __shfl_xor_sync(0xFFFFFFFF, number_of_removed_candidates, k);
-                }
-                // DEBUG
-                if (local_data.idx % WARP_SIZE == 0) {
-                    atomicAdd(device_data.idebug, number_of_removed_candidates);
-                }
-                device_sort(local_data.vertices + warp_data.number_of_members[local_data.warp_in_block_idx], warp_data.number_of_candidates[local_data.warp_in_block_idx],
-                    (local_data.idx % WARP_SIZE));
-
-                // update exdeg of vertices connected to removed cands
-                if (warp_data.total_vertices[local_data.warp_in_block_idx] - number_of_removed_candidates > number_of_removed_candidates) {
-                    for (int k = (local_data.idx % WARP_SIZE); k < warp_data.total_vertices[local_data.warp_in_block_idx] - number_of_removed_candidates; k += WARP_SIZE) {
-                        pvertexid = local_data.vertices[k].vertexid;
-                        for (int l = warp_data.total_vertices[local_data.warp_in_block_idx] - number_of_removed_candidates; l < warp_data.total_vertices[((local_data.idx / WARP_SIZE) %
-                            (BLOCK_SIZE / WARP_SIZE))]; l++) {
-                            if (device_bsearch_array(device_data.onehop_neighbors + device_data.onehop_offsets[local_data.vertices[l].vertexid], device_data.onehop_offsets[local_data.vertices[l].vertexid + 1] -
-                                device_data.onehop_offsets[local_data.vertices[l].vertexid], pvertexid) != -1) {
-                                local_data.vertices[k].exdeg--;
-                            }
-
-                            if (device_bsearch_array(device_data.twohop_neighbors + device_data.twohop_offsets[local_data.vertices[l].vertexid], device_data.twohop_offsets[local_data.vertices[l].vertexid + 1] -
-                                device_data.twohop_offsets[local_data.vertices[l].vertexid], pvertexid) != -1) {
-                                local_data.vertices[k].lvl2adj--;
-                            }
-                        }
-                    }
-                    __syncwarp();
-                }
-                else {
-                    for (int k = 0; k < warp_data.total_vertices[local_data.warp_in_block_idx] - number_of_removed_candidates; k++) {
-                        pvertexid = local_data.vertices[k].vertexid;
-                        for (int l = warp_data.total_vertices[local_data.warp_in_block_idx] - number_of_removed_candidates + (local_data.idx % WARP_SIZE); l <
-                            warp_data.total_vertices[local_data.warp_in_block_idx]; l += WARP_SIZE) {
-                            if (device_bsearch_array(device_data.onehop_neighbors + device_data.onehop_offsets[local_data.vertices[l].vertexid], device_data.onehop_offsets[local_data.vertices[l].vertexid + 1] -
-                                device_data.onehop_offsets[local_data.vertices[l].vertexid], pvertexid) != -1) {
-                                local_data.vertices[k].exdeg--;
-                            }
-
-                            if (device_bsearch_array(device_data.twohop_neighbors + device_data.twohop_offsets[local_data.vertices[l].vertexid], device_data.twohop_offsets[local_data.vertices[l].vertexid + 1] -
-                                device_data.twohop_offsets[local_data.vertices[l].vertexid], pvertexid) != -1) {
-                                local_data.vertices[k].lvl2adj--;
-                            }
-                        }
-                        __syncwarp();
-                    }
-                }
-                if ((local_data.idx % WARP_SIZE) == 0) {
-                    warp_data.total_vertices[local_data.warp_in_block_idx] -= number_of_removed_candidates;
-                    warp_data.number_of_candidates[local_data.warp_in_block_idx] -= number_of_removed_candidates;
-                }
-                __syncwarp();
-            } while (number_of_removed_candidates > 0);
-
-            // continue if not enough vertices after pruning
-            if (warp_data.total_vertices[local_data.warp_in_block_idx] < (*(device_data.minimum_clique_size))) {
+            method_return = add_one_vertex(dd, wd, ld);
+            // too many vertices pruned continue, no need to check as not enough vertices
+            if (method_return == 1) {
                 continue;
             }
 
 
 
             // HANDLE CLIQUES
-            if (warp_data.number_of_members[local_data.warp_in_block_idx] >= (*device_data.minimum_clique_size)) {
-                check_for_clique(device_data, warp_data, local_data);
+            if (wd.number_of_members[ld.warp_in_block_idx] >= (*dd.minimum_clique_size)) {
+                check_for_clique(dd, wd, ld);
             }
 
-            // TODO - test if we need to check vertex sets that have invalid bounds, dont think so
             // if vertex in x found as not extendable continue to next iteration
-            if (failed_found || warp_data.invalid_bounds[local_data.warp_in_block_idx]) {
+            if (method_return == 2) {
                 continue;
             }
 
 
 
             // WRITE TASKS TO BUFFERS
-            if (warp_data.number_of_candidates[local_data.warp_in_block_idx] > 0) {
-                write_to_tasks(device_data, warp_data, local_data);
+            if (wd.number_of_candidates[ld.warp_in_block_idx] > 0) {
+                write_to_tasks(dd, wd, ld);
             }
         }
     }
 
 
 
-    if ((local_data.idx % WARP_SIZE) == 0) {
+    if ((ld.idx % WARP_SIZE) == 0) {
         // sum to find tasks count
-        atomicAdd(device_data.total_tasks, device_data.wtasks_count[(local_data.idx / WARP_SIZE)]);
-        atomicAdd(device_data.total_cliques, device_data.wcliques_count[(local_data.idx / WARP_SIZE)]);
+        atomicAdd(dd.total_tasks, dd.wtasks_count[(ld.idx / WARP_SIZE)]);
+        atomicAdd(dd.total_cliques, dd.wcliques_count[(ld.idx / WARP_SIZE)]);
+        // DEBUG
+        //atomicAdd(dd.idebug, dd.wtasks_offset[(WTASKS_OFFSET_SIZE * (ld.idx / WARP_SIZE)) + dd.wtasks_count[(ld.idx / WARP_SIZE)]]);
     }
 
-    if (local_data.idx == 0) {
-        (*(device_data.buffer_offset_start)) = (*(device_data.buffer_count)) + 1;
-        (*(device_data.buffer_start)) = device_data.buffer_offset[(*(device_data.buffer_count))];
-        (*(device_data.cliques_offset_start)) = (*(device_data.cliques_count)) + 1;
-        (*(device_data.cliques_start)) = device_data.cliques_offset[(*(device_data.cliques_count))];
+    if (ld.idx == 0) {
+        (*(dd.buffer_offset_start)) = (*(dd.buffer_count)) + 1;
+        (*(dd.buffer_start)) = dd.buffer_offset[(*(dd.buffer_count))];
+        (*(dd.cliques_offset_start)) = (*(dd.cliques_count)) + 1;
+        (*(dd.cliques_start)) = dd.cliques_offset[(*(dd.cliques_count))];
     }
 }
 
-__global__ void transfer_buffers(GPU_Data device_data)
+__global__ void transfer_buffers(GPU_Data dd)
 {
     // THREAD INFO
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -2069,15 +1850,15 @@ __global__ void transfer_buffers(GPU_Data device_data)
     uint64_t* write_offsets;
     Vertex* write_vertices;
 
-    if ((*(device_data.current_level)) % 2 == 1) {
-        write_count = device_data.tasks2_count;
-        write_offsets = device_data.tasks2_offset;
-        write_vertices = device_data.tasks2_vertices;
+    if ((*(dd.current_level)) % 2 == 1) {
+        write_count = dd.tasks2_count;
+        write_offsets = dd.tasks2_offset;
+        write_vertices = dd.tasks2_vertices;
     }
     else {
-        write_count = device_data.tasks1_count;
-        write_offsets = device_data.tasks1_offset;
-        write_vertices = device_data.tasks1_vertices;
+        write_count = dd.tasks1_count;
+        write_offsets = dd.tasks1_offset;
+        write_vertices = dd.tasks1_vertices;
     }
 
     // block level
@@ -2086,14 +1867,14 @@ __global__ void transfer_buffers(GPU_Data device_data)
         twrite = 0;
 
         for (int i = 0; i < ((NUM_OF_BLOCKS * BLOCK_SIZE) / WARP_SIZE); i++) {
-            if (toffsetwrite + device_data.wtasks_count[i] >= EXPAND_THRESHOLD) {
+            if (toffsetwrite + dd.wtasks_count[i] >= EXPAND_THRESHOLD) {
                 twarp = i;
                 break;
             }
-            twrite += device_data.wtasks_offset[(WTASKS_OFFSET_SIZE * i) + device_data.wtasks_count[i]];
-            toffsetwrite += device_data.wtasks_count[i];
+            twrite += dd.wtasks_offset[(WTASKS_OFFSET_SIZE * i) + dd.wtasks_count[i]];
+            toffsetwrite += dd.wtasks_count[i];
         }
-        tasks_end = twrite + device_data.wtasks_offset[(WTASKS_OFFSET_SIZE * twarp) +
+        tasks_end = twrite + dd.wtasks_offset[(WTASKS_OFFSET_SIZE * twarp) +
             (EXPAND_THRESHOLD - toffsetwrite)];
     }
     __syncthreads();
@@ -2107,75 +1888,74 @@ __global__ void transfer_buffers(GPU_Data device_data)
         cliques_offset_write[warp_in_block_idx] = 1;
 
         for (int i = 0; i < (idx / WARP_SIZE); i++) {
-            tasks_offset_write[warp_in_block_idx] += device_data.wtasks_count[i];
-            tasks_write[warp_in_block_idx] += device_data.wtasks_offset[(WTASKS_OFFSET_SIZE * i) + device_data.wtasks_count[i]];
+            tasks_offset_write[warp_in_block_idx] += dd.wtasks_count[i];
+            tasks_write[warp_in_block_idx] += dd.wtasks_offset[(WTASKS_OFFSET_SIZE * i) + dd.wtasks_count[i]];
 
-            cliques_offset_write[warp_in_block_idx] += device_data.wcliques_count[i];
-            cliques_write[warp_in_block_idx] += device_data.wcliques_offset[(WCLIQUES_OFFSET_SIZE * i) + device_data.wcliques_count[i]];
+            cliques_offset_write[warp_in_block_idx] += dd.wcliques_count[i];
+            cliques_write[warp_in_block_idx] += dd.wcliques_offset[(WCLIQUES_OFFSET_SIZE * i) + dd.wcliques_count[i]];
         }
     }
     __syncwarp();
 
     // move to tasks and buffer
-    for (int i = (idx % WARP_SIZE) + 1; i <= device_data.wtasks_count[(idx / WARP_SIZE)]; i += WARP_SIZE)
+    for (int i = (idx % WARP_SIZE) + 1; i <= dd.wtasks_count[(idx / WARP_SIZE)]; i += WARP_SIZE)
     {
         if (tasks_offset_write[warp_in_block_idx] + i - 1 <= EXPAND_THRESHOLD) {
             // to tasks
-            write_offsets[tasks_offset_write[warp_in_block_idx] + i - 1] = device_data.wtasks_offset[(WTASKS_OFFSET_SIZE * (idx / WARP_SIZE)) + i] 
+            write_offsets[tasks_offset_write[warp_in_block_idx] + i - 1] = dd.wtasks_offset[(WTASKS_OFFSET_SIZE * (idx / WARP_SIZE)) + i] 
                 + tasks_write[warp_in_block_idx];
         }
         else {
             // to buffer
-            device_data.buffer_offset[tasks_offset_write[warp_in_block_idx] + i - 2 - EXPAND_THRESHOLD + (*(device_data.buffer_offset_start))] = 
-                device_data.wtasks_offset[(WTASKS_OFFSET_SIZE * (idx / WARP_SIZE)) + i] + tasks_write[warp_in_block_idx] - tasks_end + 
-                (*(device_data.buffer_start));
+            dd.buffer_offset[tasks_offset_write[warp_in_block_idx] + i - 2 - EXPAND_THRESHOLD + (*(dd.buffer_offset_start))] = 
+                dd.wtasks_offset[(WTASKS_OFFSET_SIZE * (idx / WARP_SIZE)) + i] + tasks_write[warp_in_block_idx] - tasks_end + 
+                (*(dd.buffer_start));
         }
     }
-    for (int i = (idx % WARP_SIZE); i < device_data.wtasks_offset[(WTASKS_OFFSET_SIZE * (idx / WARP_SIZE)) + device_data.wtasks_count[(idx / WARP_SIZE)]]; i += WARP_SIZE) {
+    for (int i = (idx % WARP_SIZE); i < dd.wtasks_offset[(WTASKS_OFFSET_SIZE * (idx / WARP_SIZE)) + dd.wtasks_count[(idx / WARP_SIZE)]]; i += WARP_SIZE) {
         if (tasks_write[warp_in_block_idx] + i < tasks_end) {
             // to tasks
-            write_vertices[tasks_write[warp_in_block_idx] + i] = device_data.wtasks_vertices[(WTASKS_SIZE * (idx / WARP_SIZE)) + i];
+            write_vertices[tasks_write[warp_in_block_idx] + i] = dd.wtasks_vertices[(WTASKS_SIZE * (idx / WARP_SIZE)) + i];
         }
         else {
             // to buffer
-            device_data.buffer_vertices[(*(device_data.buffer_start)) + tasks_write[warp_in_block_idx] + i - tasks_end] = 
-                device_data.wtasks_vertices[(WTASKS_SIZE * (idx / WARP_SIZE)) + i];
+            dd.buffer_vertices[(*(dd.buffer_start)) + tasks_write[warp_in_block_idx] + i - tasks_end] = 
+                dd.wtasks_vertices[(WTASKS_SIZE * (idx / WARP_SIZE)) + i];
         }
     }
 
     //move to cliques
-    for (int i = (idx % WARP_SIZE) + 1; i <= device_data.wcliques_count[(idx / WARP_SIZE)]; i += WARP_SIZE) {
-        device_data.cliques_offset[(*(device_data.cliques_offset_start)) + cliques_offset_write[warp_in_block_idx] + i - 2] = 
-            device_data.wcliques_offset[(WCLIQUES_OFFSET_SIZE * (idx / WARP_SIZE)) + i] + (*(device_data.cliques_start)) + cliques_write[warp_in_block_idx];
+    for (int i = (idx % WARP_SIZE) + 1; i <= dd.wcliques_count[(idx / WARP_SIZE)]; i += WARP_SIZE) {
+        dd.cliques_offset[(*(dd.cliques_offset_start)) + cliques_offset_write[warp_in_block_idx] + i - 2] = dd.wcliques_offset[(WCLIQUES_OFFSET_SIZE * (idx / WARP_SIZE)) + i] + (*(dd.cliques_start)) + 
+            cliques_write[warp_in_block_idx];
     }
-    for (int i = (idx % WARP_SIZE); i < device_data.wcliques_offset[(WCLIQUES_OFFSET_SIZE * (idx / WARP_SIZE)) + device_data.wcliques_count[(idx / WARP_SIZE)]]; i += WARP_SIZE) {
-        device_data.cliques_vertex[(*(device_data.cliques_start)) + cliques_write[warp_in_block_idx] + i] = device_data.wcliques_vertex[(WCLIQUES_SIZE * 
-            (idx / WARP_SIZE)) + i];
+    for (int i = (idx % WARP_SIZE); i < dd.wcliques_offset[(WCLIQUES_OFFSET_SIZE * (idx / WARP_SIZE)) + dd.wcliques_count[(idx / WARP_SIZE)]]; i += WARP_SIZE) {
+        dd.cliques_vertex[(*(dd.cliques_start)) + cliques_write[warp_in_block_idx] + i] = dd.wcliques_vertex[(WCLIQUES_SIZE * (idx / WARP_SIZE)) + i];
     }
 
     if (idx == 0) {
         // handle tasks and buffer counts
-        if ((*device_data.total_tasks) <= EXPAND_THRESHOLD) {
-            (*write_count) = (*(device_data.total_tasks));
+        if ((*dd.total_tasks) <= EXPAND_THRESHOLD) {
+            (*write_count) = (*(dd.total_tasks));
         }
         else {
             (*write_count) = EXPAND_THRESHOLD;
-            (*(device_data.buffer_count)) += ((*(device_data.total_tasks)) - EXPAND_THRESHOLD);
+            (*(dd.buffer_count)) += ((*(dd.total_tasks)) - EXPAND_THRESHOLD);
         }
-        (*(device_data.cliques_count)) += (*(device_data.total_cliques));
+        (*(dd.cliques_count)) += (*(dd.total_cliques));
 
-        (*(device_data.total_tasks)) = 0;
-        (*(device_data.total_cliques)) = 0;
+        (*(dd.total_tasks)) = 0;
+        (*(dd.total_cliques)) = 0;
     }
 
     // HANDLE CLIQUES
     // only first thread for each warp
     if ((idx % WARP_SIZE) == 0 && cliques_write[warp_in_block_idx] > (CLIQUES_SIZE * (CLIQUES_PERCENT / 100.0))) {
-        atomicExch((int*)device_data.dumping_cliques, true);
+        atomicExch((int*)dd.dumping_cliques, true);
     }
 }
 
-__global__ void fill_from_buffer(GPU_Data device_data)
+__global__ void fill_from_buffer(GPU_Data dd)
 {
     // THREAD INFO
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -2186,61 +1966,187 @@ __global__ void fill_from_buffer(GPU_Data device_data)
     uint64_t* write_offsets;
     uint64_t* write_count;
 
-    if ((*(device_data.current_level)) % 2 == 1) {
-        write_count = device_data.tasks2_count;
-        write_offsets = device_data.tasks2_offset;
-        write_vertices = device_data.tasks2_vertices;
+    if ((*(dd.current_level)) % 2 == 1) {
+        write_count = dd.tasks2_count;
+        write_offsets = dd.tasks2_offset;
+        write_vertices = dd.tasks2_vertices;
     } else {
-        write_count = device_data.tasks1_count;
-        write_offsets = device_data.tasks1_offset;
-        write_vertices = device_data.tasks1_vertices;
+        write_count = dd.tasks1_count;
+        write_offsets = dd.tasks1_offset;
+        write_vertices = dd.tasks1_vertices;
     }
 
     if (lane_idx == 0) {
-        device_data.wtasks_count[warp_idx] = 0;
-        device_data.wcliques_count[warp_idx] = 0;
+        dd.wtasks_count[warp_idx] = 0;
+        dd.wcliques_count[warp_idx] = 0;
     }
 
     // FILL TASKS FROM BUFFER
-    if ((*write_count) < EXPAND_THRESHOLD && (*(device_data.buffer_count)) > 0)
+    if ((*write_count) < EXPAND_THRESHOLD && (*(dd.buffer_count)) > 0)
     {
         // CRITICAL
-        atomicExch((int*)device_data.maximal_expansion, false);
+        atomicExch((int*)dd.maximal_expansion, false);
 
         // get read and write locations
-        int write_amount = ((*(device_data.buffer_count)) >= (EXPAND_THRESHOLD - (*write_count))) ? EXPAND_THRESHOLD - (*write_count) : (*(device_data.buffer_count));
-        uint64_t start_buffer = device_data.buffer_offset[(*(device_data.buffer_count)) - write_amount];
-        uint64_t end_buffer = device_data.buffer_offset[(*(device_data.buffer_count))];
+        int write_amount = ((*(dd.buffer_count)) >= (EXPAND_THRESHOLD - (*write_count))) ? EXPAND_THRESHOLD - (*write_count) : (*(dd.buffer_count));
+        uint64_t start_buffer = dd.buffer_offset[(*(dd.buffer_count)) - write_amount];
+        uint64_t end_buffer = dd.buffer_offset[(*(dd.buffer_count))];
         uint64_t size_buffer = end_buffer - start_buffer;
         uint64_t start_write = write_offsets[(*write_count)];
 
         // handle offsets
         for (int i = idx + 1; i <= write_amount; i += (NUM_OF_BLOCKS * BLOCK_SIZE)) {
-            write_offsets[(*write_count) + i] = start_write + (device_data.buffer_offset[(*(device_data.buffer_count)) - write_amount + i] - start_buffer);
+            write_offsets[(*write_count) + i] = start_write + (dd.buffer_offset[(*(dd.buffer_count)) - write_amount + i] - start_buffer);
         }
 
         // handle data
         for (int i = idx; i < size_buffer; i += (NUM_OF_BLOCKS * BLOCK_SIZE)) {
-            write_vertices[start_write + i] = device_data.buffer_vertices[start_buffer + i];
+            write_vertices[start_write + i] = dd.buffer_vertices[start_buffer + i];
         }
 
         if (idx == 0) {
             (*write_count) += write_amount;
-            (*(device_data.buffer_count)) -= write_amount;
+            (*(dd.buffer_count)) -= write_amount;
         }
     }
 
     if (idx == 0) {
-        (*device_data.current_level)++;
+        (*dd.current_level)++;
     }
 }
 
-__device__ void check_for_clique(GPU_Data& device_data, Warp_Data& warp_data, Local_Data& local_data)
+// returns 1 if lookahead succesful, 0 otherwise
+__device__ int lookahead_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld) 
+{
+    bool lookahead_sucess = true;
+
+    for (int j = (ld.idx % WARP_SIZE); j < wd.tot_vert[ld.warp_in_block_idx]; j += WARP_SIZE) {
+        if (ld.read_vertices[wd.start[ld.warp_in_block_idx] + j].lvl2adj != (wd.tot_vert[ld.warp_in_block_idx] - 1) || ld.read_vertices[wd.start[ld.warp_in_block_idx] + j].indeg + 
+            ld.read_vertices[wd.start[ld.warp_in_block_idx] + j].exdeg < dd.minimum_degrees[wd.tot_vert[ld.warp_in_block_idx]]) {
+            lookahead_sucess = false;
+            break;
+        }
+    }
+    lookahead_sucess = !(__any_sync(0xFFFFFFFF, !lookahead_sucess));
+
+    if (lookahead_sucess) {
+        // write to cliques
+        uint64_t start_write = (WCLIQUES_SIZE * (ld.idx / WARP_SIZE)) + dd.wcliques_offset[(WCLIQUES_OFFSET_SIZE * (ld.idx / WARP_SIZE)) + (dd.wcliques_count[(ld.idx / WARP_SIZE)])];
+        for (int j = (ld.idx % WARP_SIZE); j < wd.tot_vert[ld.warp_in_block_idx]; j += WARP_SIZE) {
+            dd.wcliques_vertex[start_write + j] = ld.read_vertices[wd.start[ld.warp_in_block_idx] + j].vertexid;
+        }
+        if ((ld.idx % WARP_SIZE) == 0) {
+            (dd.wcliques_count[(ld.idx / WARP_SIZE)])++;
+            dd.wcliques_offset[(WCLIQUES_OFFSET_SIZE * (ld.idx / WARP_SIZE)) + (dd.wcliques_count[(ld.idx / WARP_SIZE)])] = start_write - (WCLIQUES_SIZE * (ld.idx / WARP_SIZE)) + wd.tot_vert[ld.warp_in_block_idx];
+        }
+        return 1;
+    }
+    return 0;
+}
+
+// returns 1 if failed found after removing, 0 otherwise
+__device__ int remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld) 
+{
+    int pvertexid;
+    bool failed_found;
+
+    if ((ld.idx % WARP_SIZE) == 0) {
+        wd.num_cand[ld.warp_in_block_idx]--;
+        wd.tot_vert[ld.warp_in_block_idx]--;
+    }
+    __syncwarp();
+
+    pvertexid = ld.read_vertices[wd.start[ld.warp_in_block_idx] + wd.tot_vert[ld.warp_in_block_idx]].vertexid;
+    for (int k = (ld.idx % WARP_SIZE); k < wd.tot_vert[ld.warp_in_block_idx]; k += WARP_SIZE) {
+        if (device_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[pvertexid], dd.onehop_offsets[pvertexid + 1] - dd.onehop_offsets[pvertexid], ld.read_vertices[wd.start[ld.warp_in_block_idx] + k].vertexid) != -1) {
+            ld.read_vertices[wd.start[ld.warp_in_block_idx] + k].exdeg--;
+        }
+
+        if (device_bsearch_array(dd.twohop_neighbors + dd.twohop_offsets[pvertexid], dd.twohop_offsets[pvertexid + 1] - dd.twohop_offsets[pvertexid], ld.read_vertices[wd.start[ld.warp_in_block_idx] + k].vertexid) != -1) {
+            ld.read_vertices[wd.start[ld.warp_in_block_idx] + k].lvl2adj--;
+        }
+    }
+    __syncwarp();
+
+    // check for failed vertices
+    failed_found = false;
+    for (int k = (ld.idx % WARP_SIZE); k < wd.num_mem[ld.warp_in_block_idx]; k += WARP_SIZE) {
+        if (!device_vert_isextendable(ld.read_vertices[wd.start[ld.warp_in_block_idx] + k], wd.num_mem[ld.warp_in_block_idx], dd)) {
+            failed_found = true;
+            break;
+        }
+
+    }
+    failed_found = __any_sync(0xFFFFFFFF, failed_found);
+    if (failed_found) {
+        return 1;
+    }
+    return 0;
+}
+
+// returns 2, if too many vertices pruned to be considered, 1 if failed found or invalid bound, 0 otherwise
+__device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld) 
+{
+    int pvertexid;
+    bool failed_found;
+
+    if ((ld.idx % WARP_SIZE) == 0) {
+        ld.vertices[wd.total_vertices[ld.warp_in_block_idx] - 1].label = 1;
+        wd.number_of_members[ld.warp_in_block_idx]++;
+        wd.number_of_candidates[ld.warp_in_block_idx]--;
+    }
+    __syncwarp();
+
+    // update the exdeg and indeg of all vertices adj to the vertex just added to the vertex set
+    pvertexid = ld.vertices[wd.total_vertices[ld.warp_in_block_idx] - 1].vertexid;
+    for (int k = (ld.idx % WARP_SIZE); k < wd.total_vertices[ld.warp_in_block_idx]; k += WARP_SIZE) {
+        if (device_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[ld.vertices[k].vertexid], dd.onehop_offsets[ld.vertices[k].vertexid + 1] - dd.onehop_offsets[ld.vertices[k].vertexid], pvertexid) != -1) {
+            ld.vertices[k].exdeg--;
+            ld.vertices[k].indeg++;
+        }
+    }
+    __syncwarp();
+
+    // TODO - this might be able to be hard coded rather than sorted
+    // sort new vertices putting just added vertex at end of all vertices in x
+    device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx] - 1, wd.number_of_candidates[ld.warp_in_block_idx] + 1, (ld.idx % WARP_SIZE));
+
+
+
+    // --- DIAMETER PRUNING ---
+    diameter_pruning(dd, wd, ld, pvertexid);
+
+    // continue if not enough vertices after pruning
+    if (wd.total_vertices[ld.warp_in_block_idx] < (*(dd.minimum_clique_size))) {
+        return 1;
+    }
+
+
+
+    // DEGREE BASED PRUNING
+    degree_pruning(dd, wd, ld, failed_found);
+
+    // continue if not enough vertices after pruning
+    if (wd.total_vertices[ld.warp_in_block_idx] < (*(dd.minimum_clique_size))) {
+        return 1;
+    }
+
+    // TODO - test if we need to check vertex sets that have invalid bounds, dont think so
+    // if vertex in x found as not extendable continue to next iteration
+    if (failed_found || wd.invalid_bounds[ld.warp_in_block_idx]) {
+        *dd.debug = true;
+        return 2;
+    }
+    
+    return 0;
+}
+
+__device__ void check_for_clique(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 {
     bool clique = true;
 
-    for (int k = (local_data.idx % WARP_SIZE); k < warp_data.number_of_members[((local_data.idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]; k += WARP_SIZE) {
-        if (local_data.vertices[k].indeg < device_data.minimum_degrees[warp_data.number_of_members[((local_data.idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]]) {
+    for (int k = (ld.idx % WARP_SIZE); k < wd.number_of_members[ld.warp_in_block_idx]; k += WARP_SIZE) {
+        if (ld.vertices[k].indeg < dd.minimum_degrees[wd.number_of_members[ld.warp_in_block_idx]]) {
             clique = false;
             break;
         }
@@ -2250,41 +2156,154 @@ __device__ void check_for_clique(GPU_Data& device_data, Warp_Data& warp_data, Lo
 
     // if clique write to warp buffer for cliques
     if (clique) {
-        uint64_t start_write = (WCLIQUES_SIZE * (local_data.idx / WARP_SIZE)) + device_data.wcliques_offset[(WCLIQUES_OFFSET_SIZE * (local_data.idx / WARP_SIZE)) + (device_data.wcliques_count[(local_data.idx / WARP_SIZE)])];
-        for (int k = (local_data.idx % WARP_SIZE); k < warp_data.number_of_members[((local_data.idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]; k += WARP_SIZE) {
-            device_data.wcliques_vertex[start_write + k] = local_data.vertices[k].vertexid;
+        uint64_t start_write = (WCLIQUES_SIZE * (ld.idx / WARP_SIZE)) + dd.wcliques_offset[(WCLIQUES_OFFSET_SIZE * (ld.idx / WARP_SIZE)) + (dd.wcliques_count[(ld.idx / WARP_SIZE)])];
+        for (int k = (ld.idx % WARP_SIZE); k < wd.number_of_members[ld.warp_in_block_idx]; k += WARP_SIZE) {
+            dd.wcliques_vertex[start_write + k] = ld.vertices[k].vertexid;
         }
-        if ((local_data.idx % WARP_SIZE) == 0) {
-            (device_data.wcliques_count[(local_data.idx / WARP_SIZE)])++;
-            device_data.wcliques_offset[(WCLIQUES_OFFSET_SIZE * (local_data.idx / WARP_SIZE)) + (device_data.wcliques_count[(local_data.idx / WARP_SIZE)])] = start_write - (WCLIQUES_SIZE * (local_data.idx / WARP_SIZE)) +
-                warp_data.number_of_members[((local_data.idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))];
+        if ((ld.idx % WARP_SIZE) == 0) {
+            (dd.wcliques_count[(ld.idx / WARP_SIZE)])++;
+            dd.wcliques_offset[(WCLIQUES_OFFSET_SIZE * (ld.idx / WARP_SIZE)) + (dd.wcliques_count[(ld.idx / WARP_SIZE)])] = start_write - (WCLIQUES_SIZE * (ld.idx / WARP_SIZE)) +
+                wd.number_of_members[ld.warp_in_block_idx];
         }
     }
 }
 
-__device__ void write_to_tasks(GPU_Data& device_data, Warp_Data& warp_data, Local_Data& local_data)
+__device__ void write_to_tasks(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 {
     // CRITICAL
-    atomicExch((int*)device_data.maximal_expansion, false);
+    atomicExch((int*)dd.maximal_expansion, false);
 
-    uint64_t start_write = (WTASKS_SIZE * (local_data.idx / WARP_SIZE)) + device_data.wtasks_offset[WTASKS_OFFSET_SIZE * (local_data.idx / WARP_SIZE) + (device_data.wtasks_count[(local_data.idx / WARP_SIZE)])];
+    uint64_t start_write = (WTASKS_SIZE * (ld.idx / WARP_SIZE)) + dd.wtasks_offset[WTASKS_OFFSET_SIZE * (ld.idx / WARP_SIZE) + (dd.wtasks_count[(ld.idx / WARP_SIZE)])];
 
-    for (int k = (local_data.idx % WARP_SIZE); k < warp_data.total_vertices[((local_data.idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))]; k += WARP_SIZE) {
-        device_data.wtasks_vertices[start_write + k].vertexid = local_data.vertices[k].vertexid;
-        device_data.wtasks_vertices[start_write + k].label = local_data.vertices[k].label;
-        device_data.wtasks_vertices[start_write + k].indeg = local_data.vertices[k].indeg;
-        device_data.wtasks_vertices[start_write + k].exdeg = local_data.vertices[k].exdeg;
-        device_data.wtasks_vertices[start_write + k].lvl2adj = local_data.vertices[k].lvl2adj;
+    for (int k = (ld.idx % WARP_SIZE); k < wd.total_vertices[ld.warp_in_block_idx]; k += WARP_SIZE) {
+        dd.wtasks_vertices[start_write + k].vertexid = ld.vertices[k].vertexid;
+        dd.wtasks_vertices[start_write + k].label = ld.vertices[k].label;
+        dd.wtasks_vertices[start_write + k].indeg = ld.vertices[k].indeg;
+        dd.wtasks_vertices[start_write + k].exdeg = ld.vertices[k].exdeg;
+        dd.wtasks_vertices[start_write + k].lvl2adj = ld.vertices[k].lvl2adj;
     }
-    if ((local_data.idx % WARP_SIZE) == 0) {
-        (device_data.wtasks_count[(local_data.idx / WARP_SIZE)])++;
-        device_data.wtasks_offset[(WTASKS_OFFSET_SIZE * (local_data.idx / WARP_SIZE)) + (device_data.wtasks_count[(local_data.idx / WARP_SIZE)])] = start_write - (WTASKS_SIZE * (local_data.idx / WARP_SIZE)) +
-            warp_data.total_vertices[((local_data.idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE))];
+    if ((ld.idx % WARP_SIZE) == 0) {
+        (dd.wtasks_count[(ld.idx / WARP_SIZE)])++;
+        dd.wtasks_offset[(WTASKS_OFFSET_SIZE * (ld.idx / WARP_SIZE)) + (dd.wtasks_count[(ld.idx / WARP_SIZE)])] = start_write - (WTASKS_SIZE * (ld.idx / WARP_SIZE)) +
+            wd.total_vertices[ld.warp_in_block_idx];
+    }
+}
+
+__device__ void diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, int pvertexid)
+{
+    int number_of_removed_candidates;
+
+    number_of_removed_candidates = 0;
+    for (int k = wd.number_of_members[ld.warp_in_block_idx] + (ld.idx % WARP_SIZE); k < wd.total_vertices[ld.warp_in_block_idx]; k += WARP_SIZE) {
+        if (device_bsearch_array(dd.twohop_neighbors + dd.twohop_offsets[pvertexid], dd.twohop_offsets[pvertexid + 1] - dd.twohop_offsets[pvertexid], ld.vertices[k].vertexid) == -1) {
+            ld.vertices[k].label = -1;
+            number_of_removed_candidates++;
+        }
+    }
+    for (int k = 1; k < 32; k *= 2) {
+        number_of_removed_candidates += __shfl_xor_sync(0xFFFFFFFF, number_of_removed_candidates, k);
+    }
+    device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx], wd.number_of_candidates[ld.warp_in_block_idx], (ld.idx % WARP_SIZE));
+
+    // update exdeg of vertices connected to removed cands
+    update_degrees(dd, wd, ld, number_of_removed_candidates);
+
+    if ((ld.idx % WARP_SIZE) == 0) {
+        wd.total_vertices[ld.warp_in_block_idx] -= number_of_removed_candidates;
+        wd.number_of_candidates[ld.warp_in_block_idx] -= number_of_removed_candidates;
+    }
+    __syncwarp();
+}
+
+__device__ void degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, bool& failed_found)
+{
+    int number_of_removed_candidates;
+
+    do
+    {
+        // calculate lower and upper bounds for vertices
+        calculate_LU_bounds(dd, wd, ld);
+
+        if (wd.invalid_bounds[ld.warp_in_block_idx]) {
+            break;
+        }
+
+        // check for failed vertices
+        failed_found = false;
+        for (int k = (ld.idx % WARP_SIZE); k < wd.number_of_members[ld.warp_in_block_idx]; k += WARP_SIZE) {
+            if (!device_vert_isextendable_LU(ld.vertices[k], dd, wd, ld)) {
+                failed_found = true;
+                break;
+            }
+
+        }
+        failed_found = __any_sync(0xFFFFFFFF, failed_found);
+        if (failed_found) {
+            break;
+        }
+
+        // remove cands that do not meet the deg requirement
+        number_of_removed_candidates = 0;
+        for (int k = wd.number_of_members[ld.warp_in_block_idx] + (ld.idx % WARP_SIZE); k < wd.total_vertices[ld.warp_in_block_idx]; k += WARP_SIZE) {
+            if (!device_cand_isvalid_LU(ld.vertices[k], dd, wd, ld)) {
+                ld.vertices[k].label = -1;
+                number_of_removed_candidates++;
+            }
+        }
+        for (int k = 1; k < 32; k *= 2) {
+            number_of_removed_candidates += __shfl_xor_sync(0xFFFFFFFF, number_of_removed_candidates, k);
+        }
+        device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx], wd.number_of_candidates[ld.warp_in_block_idx], (ld.idx % WARP_SIZE));
+
+        // update exdeg of vertices connected to removed cands
+        update_degrees(dd, wd, ld, number_of_removed_candidates);
+
+        if ((ld.idx % WARP_SIZE) == 0) {
+            wd.total_vertices[ld.warp_in_block_idx] -= number_of_removed_candidates;
+            wd.number_of_candidates[ld.warp_in_block_idx] -= number_of_removed_candidates;
+        }
+        __syncwarp();
+    } while (number_of_removed_candidates > 0);
+}
+
+__device__ void update_degrees(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, int number_of_removed_candidates)
+{
+    int pvertexid;
+
+    if (wd.total_vertices[ld.warp_in_block_idx] - number_of_removed_candidates > number_of_removed_candidates) {
+        for (int k = (ld.idx % WARP_SIZE); k < wd.total_vertices[ld.warp_in_block_idx] - number_of_removed_candidates; k += WARP_SIZE) {
+            pvertexid = ld.vertices[k].vertexid;
+            for (int l = wd.total_vertices[ld.warp_in_block_idx] - number_of_removed_candidates; l < wd.total_vertices[ld.warp_in_block_idx]; l++) {
+                if (device_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[ld.vertices[l].vertexid], dd.onehop_offsets[ld.vertices[l].vertexid + 1] - dd.onehop_offsets[ld.vertices[l].vertexid], pvertexid) != -1) {
+                    ld.vertices[k].exdeg--;
+                }
+
+                if (device_bsearch_array(dd.twohop_neighbors + dd.twohop_offsets[ld.vertices[l].vertexid], dd.twohop_offsets[ld.vertices[l].vertexid + 1] - dd.twohop_offsets[ld.vertices[l].vertexid], pvertexid) != -1) {
+                    ld.vertices[k].lvl2adj--;
+                }
+            }
+        }
+        __syncwarp();
+    }
+    else {
+        for (int k = 0; k < wd.total_vertices[ld.warp_in_block_idx] - number_of_removed_candidates; k++) {
+            pvertexid = ld.vertices[k].vertexid;
+            for (int l = wd.total_vertices[ld.warp_in_block_idx] - number_of_removed_candidates + (ld.idx % WARP_SIZE); l < wd.total_vertices[ld.warp_in_block_idx]; l += WARP_SIZE) {
+                if (device_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[ld.vertices[l].vertexid], dd.onehop_offsets[ld.vertices[l].vertexid + 1] - dd.onehop_offsets[ld.vertices[l].vertexid], pvertexid) != -1) {
+                    ld.vertices[k].exdeg--;
+                }
+
+                if (device_bsearch_array(dd.twohop_neighbors + dd.twohop_offsets[ld.vertices[l].vertexid], dd.twohop_offsets[ld.vertices[l].vertexid + 1] - dd.twohop_offsets[ld.vertices[l].vertexid], pvertexid) != -1) {
+                    ld.vertices[k].lvl2adj--;
+                }
+            }
+            __syncwarp();
+        }
     }
 }
 
 // TODO - try to parallelize as much calculation as possible
-__device__ void calculate_LU_bounds(GPU_Data& device_data, Warp_Data& warp_data, Local_Data& local_data)
+__device__ void calculate_LU_bounds(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 {
     int index;
 
@@ -2294,43 +2313,43 @@ __device__ void calculate_LU_bounds(GPU_Data& device_data, Warp_Data& warp_data,
     int sum_clq_indeg;
 
     // CALCULATE LOWER UPPER BOUNDS
-    min_clq_indeg = local_data.vertices[0].indeg;
-    min_indeg_exdeg = local_data.vertices[0].exdeg;
-    min_clq_totaldeg = local_data.vertices[0].indeg + local_data.vertices[0].exdeg;
+    min_clq_indeg = ld.vertices[0].indeg;
+    min_indeg_exdeg = ld.vertices[0].exdeg;
+    min_clq_totaldeg = ld.vertices[0].indeg + ld.vertices[0].exdeg;
     sum_clq_indeg = 0;
 
-    if ((local_data.idx % WARP_SIZE) == 0) {
-        warp_data.invalid_bounds[local_data.warp_in_block_idx] = false;
+    if ((ld.idx % WARP_SIZE) == 0) {
+        wd.invalid_bounds[ld.warp_in_block_idx] = false;
 
-        warp_data.sum_candidate_indeg[local_data.warp_in_block_idx] = 0;
-        warp_data.tightened_Upper_bound[local_data.warp_in_block_idx] = 0;
+        wd.sum_candidate_indeg[ld.warp_in_block_idx] = 0;
+        wd.tightened_Upper_bound[ld.warp_in_block_idx] = 0;
 
-        warp_data.min_clq_indeg[local_data.warp_in_block_idx] = local_data.vertices[0].indeg;
-        warp_data.min_indeg_exdeg[local_data.warp_in_block_idx] = local_data.vertices[0].exdeg;
-        warp_data.min_clq_totaldeg[local_data.warp_in_block_idx] = local_data.vertices[0].indeg + local_data.vertices[0].exdeg;
-        warp_data.sum_clq_indeg[local_data.warp_in_block_idx] = local_data.vertices[0].indeg;
+        wd.min_clq_indeg[ld.warp_in_block_idx] = ld.vertices[0].indeg;
+        wd.min_indeg_exdeg[ld.warp_in_block_idx] = ld.vertices[0].exdeg;
+        wd.min_clq_totaldeg[ld.warp_in_block_idx] = ld.vertices[0].indeg + ld.vertices[0].exdeg;
+        wd.sum_clq_indeg[ld.warp_in_block_idx] = ld.vertices[0].indeg;
 
-        warp_data.minimum_external_degree[local_data.warp_in_block_idx] = device_get_mindeg(warp_data.number_of_members[local_data.warp_in_block_idx] + 1,
-            device_data);
+        wd.minimum_external_degree[ld.warp_in_block_idx] = device_get_mindeg(wd.number_of_members[ld.warp_in_block_idx] + 1,
+            dd);
     }
     __syncwarp();
 
     // each warp finds these values on their subsection of vertices
-    for (index = 1 + (local_data.idx % WARP_SIZE); index < warp_data.number_of_members[local_data.warp_in_block_idx]; index += WARP_SIZE) {
-        sum_clq_indeg += local_data.vertices[index].indeg;
+    for (index = 1 + (ld.idx % WARP_SIZE); index < wd.number_of_members[ld.warp_in_block_idx]; index += WARP_SIZE) {
+        sum_clq_indeg += ld.vertices[index].indeg;
 
-        if (local_data.vertices[index].indeg < min_clq_indeg) {
-            min_clq_indeg = local_data.vertices[index].indeg;
-            min_indeg_exdeg = local_data.vertices[index].exdeg;
+        if (ld.vertices[index].indeg < min_clq_indeg) {
+            min_clq_indeg = ld.vertices[index].indeg;
+            min_indeg_exdeg = ld.vertices[index].exdeg;
         }
-        else if (local_data.vertices[index].indeg == min_clq_indeg) {
-            if (local_data.vertices[index].exdeg < min_indeg_exdeg) {
-                min_indeg_exdeg = local_data.vertices[index].exdeg;
+        else if (ld.vertices[index].indeg == min_clq_indeg) {
+            if (ld.vertices[index].exdeg < min_indeg_exdeg) {
+                min_indeg_exdeg = ld.vertices[index].exdeg;
             }
         }
 
-        if (local_data.vertices[index].indeg + local_data.vertices[index].exdeg < min_clq_totaldeg) {
-            min_clq_totaldeg = local_data.vertices[index].indeg + local_data.vertices[index].exdeg;
+        if (ld.vertices[index].indeg + ld.vertices[index].exdeg < min_clq_totaldeg) {
+            min_clq_totaldeg = ld.vertices[index].indeg + ld.vertices[index].exdeg;
         }
     }
 
@@ -2338,125 +2357,117 @@ __device__ void calculate_LU_bounds(GPU_Data& device_data, Warp_Data& warp_data,
     for (int i = 1; i < 32; i *= 2) {
         sum_clq_indeg += __shfl_xor_sync(0xFFFFFFFF, sum_clq_indeg, i);
     }
-    if ((local_data.idx % WARP_SIZE) == 0) {
+    if ((ld.idx % WARP_SIZE) == 0) {
         // add to shared memory sum
-        warp_data.sum_clq_indeg[local_data.warp_in_block_idx] += sum_clq_indeg;
+        wd.sum_clq_indeg[ld.warp_in_block_idx] += sum_clq_indeg;
     }
     __syncwarp();
 
     // CRITICAL SECTION - each lane then compares their values to the next to get a warp level value
     for (int i = 0; i < WARP_SIZE; i++) {
-        if ((local_data.idx % WARP_SIZE) == i) {
-            if (min_clq_indeg < warp_data.min_clq_indeg[local_data.warp_in_block_idx]) {
-                warp_data.min_clq_indeg[local_data.warp_in_block_idx] = min_clq_indeg;
-                warp_data.min_indeg_exdeg[local_data.warp_in_block_idx] = min_indeg_exdeg;
+        if ((ld.idx % WARP_SIZE) == i) {
+            if (min_clq_indeg < wd.min_clq_indeg[ld.warp_in_block_idx]) {
+                wd.min_clq_indeg[ld.warp_in_block_idx] = min_clq_indeg;
+                wd.min_indeg_exdeg[ld.warp_in_block_idx] = min_indeg_exdeg;
             }
-            else if (min_clq_indeg == warp_data.min_clq_indeg[local_data.warp_in_block_idx]) {
-                if (min_indeg_exdeg < warp_data.min_indeg_exdeg[local_data.warp_in_block_idx]) {
-                    warp_data.min_indeg_exdeg[local_data.warp_in_block_idx] = min_indeg_exdeg;
+            else if (min_clq_indeg == wd.min_clq_indeg[ld.warp_in_block_idx]) {
+                if (min_indeg_exdeg < wd.min_indeg_exdeg[ld.warp_in_block_idx]) {
+                    wd.min_indeg_exdeg[ld.warp_in_block_idx] = min_indeg_exdeg;
                 }
             }
 
-            if (min_clq_totaldeg < warp_data.min_clq_totaldeg[local_data.warp_in_block_idx]) {
-                warp_data.min_clq_totaldeg[local_data.warp_in_block_idx] = min_clq_totaldeg;
+            if (min_clq_totaldeg < wd.min_clq_totaldeg[ld.warp_in_block_idx]) {
+                wd.min_clq_totaldeg[ld.warp_in_block_idx] = min_clq_totaldeg;
             }
         }
         __syncwarp();
     }
 
-    // CRITICAL SECTION - unsure how to parallelize this, very complex
-    if ((local_data.idx % WARP_SIZE) == 0) {
-        if (warp_data.min_clq_indeg[local_data.warp_in_block_idx] < device_data.minimum_degrees[warp_data.number_of_members[local_data.warp_in_block_idx]])
+    // TODO - CRITICAL SECTION - unsure how to parallelize this, very complex
+    if ((ld.idx % WARP_SIZE) == 0) {
+        if (wd.min_clq_indeg[ld.warp_in_block_idx] < dd.minimum_degrees[wd.number_of_members[ld.warp_in_block_idx]])
         {
             // lower
-            warp_data.Lower_bound[local_data.warp_in_block_idx] = device_get_mindeg(warp_data.number_of_members[local_data.warp_in_block_idx], device_data) -
-                min_clq_indeg;
+            wd.Lower_bound[ld.warp_in_block_idx] = device_get_mindeg(wd.number_of_members[ld.warp_in_block_idx], dd) - min_clq_indeg;
 
-            while (warp_data.Lower_bound[local_data.warp_in_block_idx] <= warp_data.min_indeg_exdeg[local_data.warp_in_block_idx] &&
-                warp_data.min_clq_indeg[local_data.warp_in_block_idx] + warp_data.Lower_bound[local_data.warp_in_block_idx] <
-                device_data.minimum_degrees[warp_data.number_of_members[local_data.warp_in_block_idx] + warp_data.Lower_bound[local_data.warp_in_block_idx]]) {
-                warp_data.Lower_bound[local_data.warp_in_block_idx]++;
+            while (wd.Lower_bound[ld.warp_in_block_idx] <= wd.min_indeg_exdeg[ld.warp_in_block_idx] && wd.min_clq_indeg[ld.warp_in_block_idx] + wd.Lower_bound[ld.warp_in_block_idx] <
+                dd.minimum_degrees[wd.number_of_members[ld.warp_in_block_idx] + wd.Lower_bound[ld.warp_in_block_idx]]) {
+                wd.Lower_bound[ld.warp_in_block_idx]++;
             }
 
-            if (warp_data.min_clq_indeg[local_data.warp_in_block_idx] + warp_data.Lower_bound[local_data.warp_in_block_idx] <
-                device_data.minimum_degrees[warp_data.number_of_members[local_data.warp_in_block_idx] + warp_data.Lower_bound[local_data.warp_in_block_idx]]) {
-                warp_data.invalid_bounds[local_data.warp_in_block_idx] = true;
+            if (wd.min_clq_indeg[ld.warp_in_block_idx] + wd.Lower_bound[ld.warp_in_block_idx] < dd.minimum_degrees[wd.number_of_members[ld.warp_in_block_idx] + wd.Lower_bound[ld.warp_in_block_idx]]) {
+                wd.invalid_bounds[ld.warp_in_block_idx] = true;
             }
 
             // upper
-            warp_data.Upper_bound[local_data.warp_in_block_idx] = floor(warp_data.min_clq_totaldeg[local_data.warp_in_block_idx] /
-                (*(device_data.minimum_degree_ratio))) + 1 - warp_data.number_of_members[local_data.warp_in_block_idx];
+            wd.Upper_bound[ld.warp_in_block_idx] = floor(wd.min_clq_totaldeg[ld.warp_in_block_idx] / (*(dd.minimum_degree_ratio))) + 1 - wd.number_of_members[ld.warp_in_block_idx];
 
-            if (warp_data.Upper_bound[local_data.warp_in_block_idx] > warp_data.number_of_candidates[local_data.warp_in_block_idx]) {
-                warp_data.Upper_bound[local_data.warp_in_block_idx] = warp_data.number_of_candidates[local_data.warp_in_block_idx];
+            if (wd.Upper_bound[ld.warp_in_block_idx] > wd.number_of_candidates[ld.warp_in_block_idx]) {
+                wd.Upper_bound[ld.warp_in_block_idx] = wd.number_of_candidates[ld.warp_in_block_idx];
             }
 
             // tighten
-            if (warp_data.Lower_bound[local_data.warp_in_block_idx] < warp_data.Upper_bound[local_data.warp_in_block_idx]) {
+            if (wd.Lower_bound[ld.warp_in_block_idx] < wd.Upper_bound[ld.warp_in_block_idx]) {
                 // tighten lower
-                for (index = 0; index < warp_data.Lower_bound[local_data.warp_in_block_idx]; index++) {
-                    warp_data.sum_candidate_indeg[local_data.warp_in_block_idx] += local_data.vertices[warp_data.number_of_members[local_data.warp_in_block_idx] + index].indeg;
+                for (index = 0; index < wd.Lower_bound[ld.warp_in_block_idx]; index++) {
+                    wd.sum_candidate_indeg[ld.warp_in_block_idx] += ld.vertices[wd.number_of_members[ld.warp_in_block_idx] + index].indeg;
                 }
 
-                while (index < warp_data.Upper_bound[local_data.warp_in_block_idx] && warp_data.sum_clq_indeg[local_data.warp_in_block_idx] + warp_data.sum_candidate_indeg[local_data.warp_in_block_idx]
-                    < warp_data.number_of_members[local_data.warp_in_block_idx] *
-                    device_data.minimum_degrees[warp_data.number_of_members[local_data.warp_in_block_idx] + index]) {
-                    warp_data.sum_candidate_indeg[local_data.warp_in_block_idx] += local_data.vertices[warp_data.number_of_members[local_data.warp_in_block_idx] + index].indeg;
+                while (index < wd.Upper_bound[ld.warp_in_block_idx] && wd.sum_clq_indeg[ld.warp_in_block_idx] + wd.sum_candidate_indeg[ld.warp_in_block_idx] < wd.number_of_members[ld.warp_in_block_idx] *
+                    dd.minimum_degrees[wd.number_of_members[ld.warp_in_block_idx] + index]) {
+                    wd.sum_candidate_indeg[ld.warp_in_block_idx] += ld.vertices[wd.number_of_members[ld.warp_in_block_idx] + index].indeg;
                     index++;
                 }
 
-                if (warp_data.sum_clq_indeg[local_data.warp_in_block_idx] + warp_data.sum_candidate_indeg[local_data.warp_in_block_idx] < warp_data.number_of_members[local_data.warp_in_block_idx] *
-                    device_data.minimum_degrees[warp_data.number_of_members[local_data.warp_in_block_idx] + index]) {
-                    warp_data.invalid_bounds[local_data.warp_in_block_idx] = true;
+                if (wd.sum_clq_indeg[ld.warp_in_block_idx] + wd.sum_candidate_indeg[ld.warp_in_block_idx] < wd.number_of_members[ld.warp_in_block_idx] * dd.minimum_degrees[wd.number_of_members[ld.warp_in_block_idx] + index]) {
+                    wd.invalid_bounds[ld.warp_in_block_idx] = true;
                 }
                 else {
-                    warp_data.Lower_bound[local_data.warp_in_block_idx] = index;
+                    wd.Lower_bound[ld.warp_in_block_idx] = index;
 
-                    warp_data.tightened_Upper_bound[local_data.warp_in_block_idx] = index;
+                    wd.tightened_Upper_bound[ld.warp_in_block_idx] = index;
 
-                    while (index < warp_data.Upper_bound[local_data.warp_in_block_idx]) {
-                        warp_data.sum_candidate_indeg[local_data.warp_in_block_idx] += local_data.vertices[warp_data.number_of_members[local_data.warp_in_block_idx] + index].indeg;
+                    while (index < wd.Upper_bound[ld.warp_in_block_idx]) {
+                        wd.sum_candidate_indeg[ld.warp_in_block_idx] += ld.vertices[wd.number_of_members[ld.warp_in_block_idx] + index].indeg;
 
                         index++;
 
-                        if (warp_data.sum_clq_indeg[local_data.warp_in_block_idx] + warp_data.sum_candidate_indeg[local_data.warp_in_block_idx] >= warp_data.number_of_members[local_data.warp_in_block_idx]
-                            * device_data.minimum_degrees[warp_data.number_of_members[local_data.warp_in_block_idx] + index]) {
-                            warp_data.tightened_Upper_bound[local_data.warp_in_block_idx] = index;
+                        if (wd.sum_clq_indeg[ld.warp_in_block_idx] + wd.sum_candidate_indeg[ld.warp_in_block_idx] >= wd.number_of_members[ld.warp_in_block_idx] * 
+                            dd.minimum_degrees[wd.number_of_members[ld.warp_in_block_idx] + index]) {
+                            wd.tightened_Upper_bound[ld.warp_in_block_idx] = index;
                         }
                     }
 
-                    if (warp_data.Upper_bound[local_data.warp_in_block_idx] > warp_data.tightened_Upper_bound[local_data.warp_in_block_idx]) {
-                        warp_data.Upper_bound[local_data.warp_in_block_idx] = warp_data.tightened_Upper_bound[local_data.warp_in_block_idx];
+                    if (wd.Upper_bound[ld.warp_in_block_idx] > wd.tightened_Upper_bound[ld.warp_in_block_idx]) {
+                        wd.Upper_bound[ld.warp_in_block_idx] = wd.tightened_Upper_bound[ld.warp_in_block_idx];
                     }
 
-                    if (warp_data.Lower_bound[local_data.warp_in_block_idx] > 1) {
-                        warp_data.minimum_external_degree[local_data.warp_in_block_idx] = device_get_mindeg(warp_data.number_of_members[local_data.warp_in_block_idx]
-                            + warp_data.Lower_bound[local_data.warp_in_block_idx], device_data);
+                    if (wd.Lower_bound[ld.warp_in_block_idx] > 1) {
+                        wd.minimum_external_degree[ld.warp_in_block_idx] = device_get_mindeg(wd.number_of_members[ld.warp_in_block_idx] + wd.Lower_bound[ld.warp_in_block_idx], dd);
                     }
                 }
             }
         }
         else {
-            warp_data.minimum_external_degree[local_data.warp_in_block_idx] = device_get_mindeg(warp_data.number_of_members[local_data.warp_in_block_idx] + 1,
-                device_data);
+            wd.minimum_external_degree[ld.warp_in_block_idx] = device_get_mindeg(wd.number_of_members[ld.warp_in_block_idx] + 1,
+                dd);
 
-            warp_data.Upper_bound[local_data.warp_in_block_idx] = warp_data.number_of_candidates[local_data.warp_in_block_idx];
+            wd.Upper_bound[ld.warp_in_block_idx] = wd.number_of_candidates[ld.warp_in_block_idx];
 
-            if (warp_data.number_of_members[local_data.warp_in_block_idx] < (*(device_data.minimum_clique_size))) {
-                warp_data.Lower_bound[local_data.warp_in_block_idx] = (*(device_data.minimum_clique_size)) - warp_data.number_of_members[local_data.warp_in_block_idx];
+            if (wd.number_of_members[ld.warp_in_block_idx] < (*(dd.minimum_clique_size))) {
+                wd.Lower_bound[ld.warp_in_block_idx] = (*(dd.minimum_clique_size)) - wd.number_of_members[ld.warp_in_block_idx];
             }
             else {
-                warp_data.Lower_bound[local_data.warp_in_block_idx] = 0;
+                wd.Lower_bound[ld.warp_in_block_idx] = 0;
             }
         }
 
-        if (warp_data.number_of_members[local_data.warp_in_block_idx] + warp_data.Upper_bound[local_data.warp_in_block_idx] < (*(device_data.minimum_clique_size))) {
-            warp_data.invalid_bounds[local_data.warp_in_block_idx] = true;
+        if (wd.number_of_members[ld.warp_in_block_idx] + wd.Upper_bound[ld.warp_in_block_idx] < (*(dd.minimum_clique_size))) {
+            wd.invalid_bounds[ld.warp_in_block_idx] = true;
         }
 
-        if (warp_data.Upper_bound[local_data.warp_in_block_idx] < 0 || warp_data.Upper_bound[local_data.warp_in_block_idx] <
-            warp_data.Lower_bound[local_data.warp_in_block_idx]) {
-            warp_data.invalid_bounds[local_data.warp_in_block_idx] = true;
+        if (wd.Upper_bound[ld.warp_in_block_idx] < 0 || wd.Upper_bound[ld.warp_in_block_idx] < wd.Lower_bound[ld.warp_in_block_idx]) {
+            wd.invalid_bounds[ld.warp_in_block_idx] = true;
         }
     }
     __syncwarp();
@@ -2464,6 +2475,51 @@ __device__ void calculate_LU_bounds(GPU_Data& device_data, Warp_Data& warp_data,
 
 
 // --- HELPER KERNELS ---
+
+// DEBUG
+__device__ void degree_pruning_nonLU(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, bool& failed_found)
+{
+    int number_of_removed_candidates;
+
+    do
+    {
+        // check for failed vertices
+        failed_found = false;
+        for (int k = (ld.idx % WARP_SIZE); k < wd.number_of_members[ld.warp_in_block_idx]; k += WARP_SIZE) {
+            if (!device_vert_isextendable(ld.vertices[k], wd.number_of_members[ld.warp_in_block_idx], dd)) {
+                failed_found = true;
+                break;
+            }
+
+        }
+        failed_found = __any_sync(0xFFFFFFFF, failed_found);
+        if (failed_found) {
+            break;
+        }
+
+        // remove cands that do not meet the deg requirement
+        number_of_removed_candidates = 0;
+        for (int k = wd.number_of_members[ld.warp_in_block_idx] + (ld.idx % WARP_SIZE); k < wd.total_vertices[ld.warp_in_block_idx]; k += WARP_SIZE) {
+            if (!device_cand_isvalid(ld.vertices[k], wd.number_of_members[ld.warp_in_block_idx], dd)) {
+                ld.vertices[k].label = -1;
+                number_of_removed_candidates++;
+            }
+        }
+        for (int k = 1; k < 32; k *= 2) {
+            number_of_removed_candidates += __shfl_xor_sync(0xFFFFFFFF, number_of_removed_candidates, k);
+        }
+        device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx], wd.number_of_candidates[ld.warp_in_block_idx], (ld.idx % WARP_SIZE));
+
+        // update exdeg of vertices connected to removed cands
+        update_degrees(dd, wd, ld, number_of_removed_candidates);
+
+        if ((ld.idx % WARP_SIZE) == 0) {
+            wd.total_vertices[ld.warp_in_block_idx] -= number_of_removed_candidates;
+            wd.number_of_candidates[ld.warp_in_block_idx] -= number_of_removed_candidates;
+        }
+        __syncwarp();
+    } while (number_of_removed_candidates > 0);
+}
 
 // TODO - convert to merge or radix sort, merge is recursive
 __device__ void device_sort(Vertex* target, int size, int lane_idx)
@@ -2477,10 +2533,7 @@ __device__ void device_sort(Vertex* target, int size, int lane_idx)
             Vertex vertex1 = target[j];
             Vertex vertex2 = target[j + 1];
 
-            int result;
-            sort_vert(vertex1, vertex2, result);
-
-            if (result == 1) {
+            if (sort_vert(vertex1, vertex2) == 1) {
                 target[j] = target[j + 1];
                 target[j + 1] = vertex1;
             }
@@ -2489,110 +2542,89 @@ __device__ void device_sort(Vertex* target, int size, int lane_idx)
     }
 }
 
-// TODO - use return rather than result reference
-__device__ void sort_vert(Vertex& vertex1, Vertex& vertex2, int& result)
+// TODO - clean up method
+__device__ __forceinline int sort_vert(Vertex& vertex1, Vertex& vertex2)
 {
     // order is: in clique -> covered -> critical adj vertices -> cands -> cover -> pruned
 
     // in clique
     if (vertex1.label == 1 && vertex2.label != 1) {
-        result = -1;
-        return;
+        return -1;
     }
     else if (vertex1.label != 1 && vertex2.label == 1) {
-        result = 1;
-        return;
+        return 1;
 
-        // covered candidate vertices
+    // covered candidate vertices
     }
     else if (vertex1.label == 2 && vertex2.label != 2) {
-        result = -1;
-        return;
+        return -1;
     }
     else if (vertex1.label != 2 && vertex2.label == 2) {
-        result = 1;
-        return;
+        return 1;
 
-        // critical adjacent candidate vertices
+    // critical adjacent candidate vertices
     }
     else if (vertex1.label == 4 && vertex2.label != 4) {
-        result = -1;
-        return;
+        return -1;
     }
     else if (vertex1.label != 4 && vertex2.label == 4) {
-        result = 1;
-        return;
+        return 1;
 
-        // candidate vertices
+    // candidate vertices
     }
     else if (vertex1.label == 0 && vertex2.label != 0) {
-        result = -1;
-        return;
+        return -1;
     }
     else if (vertex1.label != 0 && vertex2.label == 0) {
-        result = 1;
-        return;
+        return 1;
 
-        // the cover vertex
+    // the cover vertex
     }
     else if (vertex1.label == 3 && vertex2.label != 3) {
-        result = -1;
-        return;
+        return -1;
     }
     else if (vertex1.label != 3 && vertex2.label == 3) {
-        result = 1;
-        return;
+        return 1;
 
-        // vertices that have been pruned
+    // vertices that have been pruned
     }
     else if (vertex1.label == -1 && vertex2.label != 1) {
-        result = 1;
-        return;
+        return 1;
     }
     else if (vertex1.label != -1 && vertex2.label == -1) {
-        result = -1;
-        return;
+        return -1;
     }
 
     // for ties: in clique low -> high, cand high -> low
     else if (vertex1.label == 1 && vertex2.label == 1) {
         if (vertex1.vertexid > vertex2.vertexid) {
-            result = 1;
-            return;
+            return 1;
         }
         else if (vertex1.vertexid < vertex2.vertexid) {
-            result = -1;
-            return;
+            return -1;
         }
         else {
-            result = 0;
-            return;
+            return 0;
         }
     }
     else if (vertex1.label == 0 && vertex2.label == 0) {
         if (vertex1.vertexid > vertex2.vertexid) {
-            result = -1;
-            return;
+            return -1;
         }
         else if (vertex1.vertexid < vertex2.vertexid) {
-            result = 1;
-            return;
+            return 1;
         }
         else {
-            result = 0;
-            return;
+            return 0;
         }
     }
     else if (vertex1.label == 2 && vertex2.label == 2) {
-        result = 0;
-        return;
+        return 0;
     }
     else if (vertex1.label == -1 && vertex2.label == -1) {
-        result = 0;
-        return;
+        return 0;
     }
-    result = 0;
-    return;
+    return 0;
 }
 
 // searches an int array for a certain int, returns the position in the array that item was found, or -1 if not found
@@ -2621,15 +2653,15 @@ __device__ int device_bsearch_array(int* search_array, int array_size, int searc
     }
 }
 
-__device__ bool device_vert_isextendable(Vertex& vertex, int number_of_members, GPU_Data& device_data)
+__device__ __forceinline bool device_vert_isextendable(Vertex& vertex, int number_of_members, GPU_Data& dd)
 {
-    if (vertex.indeg + vertex.exdeg < device_data.minimum_degrees[(*(device_data.minimum_clique_size))]) {
+    if (vertex.indeg + vertex.exdeg < dd.minimum_degrees[(*(dd.minimum_clique_size))]) {
         return false;
     }
-    else if (vertex.lvl2adj < (*(device_data.minimum_clique_size)) - 1) {
+    else if (vertex.lvl2adj < (*(dd.minimum_clique_size)) - 1) {
         return false;
     }
-    else if (vertex.indeg + vertex.exdeg < device_get_mindeg(number_of_members+vertex.exdeg, device_data)) {
+    else if (vertex.indeg + vertex.exdeg < device_get_mindeg(number_of_members+vertex.exdeg, dd)) {
         return false;
     }
     else {
@@ -2637,15 +2669,15 @@ __device__ bool device_vert_isextendable(Vertex& vertex, int number_of_members, 
     }
 }
 
-__device__ bool device_cand_isvalid(Vertex& vertex, int number_of_members, GPU_Data& device_data)
+__device__ __forceinline bool device_cand_isvalid(Vertex& vertex, int number_of_members, GPU_Data& dd)
 {
-    if (vertex.indeg + vertex.exdeg < device_data.minimum_degrees[(*(device_data.minimum_clique_size))]) {
+    if (vertex.indeg + vertex.exdeg < dd.minimum_degrees[(*(dd.minimum_clique_size))]) {
         return false;
     }
-    else if (vertex.lvl2adj < (*(device_data.minimum_clique_size)) - 1) {
+    else if (vertex.lvl2adj < (*(dd.minimum_clique_size)) - 1) {
         return false;
     }
-    else if (vertex.indeg + vertex.exdeg < device_get_mindeg(number_of_members + vertex.exdeg + 1, device_data)) {
+    else if (vertex.indeg + vertex.exdeg < device_get_mindeg(number_of_members + vertex.exdeg + 1, dd)) {
         return false;
     }
     else {
@@ -2653,24 +2685,24 @@ __device__ bool device_cand_isvalid(Vertex& vertex, int number_of_members, GPU_D
     }
 }
 
-__device__ bool device_cand_isvalid_LU(Vertex& vertex, GPU_Data& device_data, Warp_Data& warp_data, Local_Data& local_data)
+__device__ __forceinline bool device_cand_isvalid_LU(Vertex& vertex, GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 {
-    if (vertex.indeg + vertex.exdeg < device_data.minimum_degrees[(*(device_data.minimum_clique_size))]) {
+    if (vertex.indeg + vertex.exdeg < dd.minimum_degrees[(*(dd.minimum_clique_size))]) {
         return false;
     }
-    else if (vertex.lvl2adj < (*(device_data.minimum_clique_size)) - 1) {
+    else if (vertex.lvl2adj < (*(dd.minimum_clique_size)) - 1) {
         return false;
     }
-    else if (vertex.indeg + vertex.exdeg < device_get_mindeg(warp_data.number_of_members[local_data.warp_in_block_idx] + vertex.exdeg + 1, device_data)) {
+    else if (vertex.indeg + vertex.exdeg < device_get_mindeg(wd.number_of_members[ld.warp_in_block_idx] + vertex.exdeg + 1, dd)) {
         return false;
     }
-    else if (vertex.indeg + vertex.exdeg < warp_data.minimum_external_degree[local_data.warp_in_block_idx]) {
+    else if (vertex.indeg + vertex.exdeg < wd.minimum_external_degree[ld.warp_in_block_idx]) {
         return false;
     }
-    else if (vertex.indeg + warp_data.Upper_bound[local_data.warp_in_block_idx] - 1 < device_data.minimum_degrees[warp_data.number_of_members[local_data.warp_in_block_idx] + warp_data.Lower_bound[local_data.warp_in_block_idx]]) {
+    else if (vertex.indeg + wd.Upper_bound[ld.warp_in_block_idx] - 1 < dd.minimum_degrees[wd.number_of_members[ld.warp_in_block_idx] + wd.Lower_bound[ld.warp_in_block_idx]]) {
         return false;
     }
-    else if (vertex.indeg + vertex.exdeg < device_get_mindeg(warp_data.number_of_members[local_data.warp_in_block_idx] + warp_data.Lower_bound[local_data.warp_in_block_idx], device_data)) {
+    else if (vertex.indeg + vertex.exdeg < device_get_mindeg(wd.number_of_members[ld.warp_in_block_idx] + wd.Lower_bound[ld.warp_in_block_idx], dd)) {
         return false;
     }
     else {
@@ -2678,28 +2710,28 @@ __device__ bool device_cand_isvalid_LU(Vertex& vertex, GPU_Data& device_data, Wa
     }
 }
 
-__device__ bool device_vert_isextendable_LU(Vertex& vertex, GPU_Data& device_data, Warp_Data& warp_data, Local_Data& local_data)
+__device__ __forceinline bool device_vert_isextendable_LU(Vertex& vertex, GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 {
-    if (vertex.indeg + vertex.exdeg < device_data.minimum_degrees[(*(device_data.minimum_clique_size))]) {
+    if (vertex.indeg + vertex.exdeg < dd.minimum_degrees[(*(dd.minimum_clique_size))]) {
         return false;
     }
-    else if (vertex.lvl2adj < (*(device_data.minimum_clique_size)) - 1) {
+    else if (vertex.lvl2adj < (*(dd.minimum_clique_size)) - 1) {
         return false;
     }
-    else if (vertex.indeg + vertex.exdeg < device_get_mindeg(warp_data.number_of_members[local_data.warp_in_block_idx] + vertex.exdeg, device_data)) {
+    else if (vertex.indeg + vertex.exdeg < device_get_mindeg(wd.number_of_members[ld.warp_in_block_idx] + vertex.exdeg, dd)) {
         return false;
     }
-    else if (vertex.indeg + vertex.exdeg < warp_data.minimum_external_degree[local_data.warp_in_block_idx]) {
+    else if (vertex.indeg + vertex.exdeg < wd.minimum_external_degree[ld.warp_in_block_idx]) {
         return false;
     }
     // TODO - I think this else if is useless
-    else if (vertex.exdeg == 0 && vertex.indeg < device_get_mindeg(warp_data.number_of_members[local_data.warp_in_block_idx] + vertex.exdeg, device_data)) {
+    else if (vertex.exdeg == 0 && vertex.indeg < device_get_mindeg(wd.number_of_members[ld.warp_in_block_idx] + vertex.exdeg, dd)) {
         return false;
     }
-    else if (vertex.indeg + warp_data.Upper_bound[local_data.warp_in_block_idx] < device_data.minimum_degrees[warp_data.number_of_members[local_data.warp_in_block_idx] + warp_data.Upper_bound[local_data.warp_in_block_idx]]) {
+    else if (vertex.indeg + wd.Upper_bound[ld.warp_in_block_idx] < dd.minimum_degrees[wd.number_of_members[ld.warp_in_block_idx] + wd.Upper_bound[ld.warp_in_block_idx]]) {
         return false;
     }
-    else if (vertex.indeg + vertex.exdeg < device_get_mindeg(warp_data.number_of_members[local_data.warp_in_block_idx] + warp_data.Lower_bound[local_data.warp_in_block_idx], device_data)) {
+    else if (vertex.indeg + vertex.exdeg < device_get_mindeg(wd.number_of_members[ld.warp_in_block_idx] + wd.Lower_bound[ld.warp_in_block_idx], dd)) {
         return false;
     }
     else {
@@ -2707,13 +2739,13 @@ __device__ bool device_vert_isextendable_LU(Vertex& vertex, GPU_Data& device_dat
     }
 }
 
-__device__ int device_get_mindeg(int number_of_members, GPU_Data& device_data)
+__device__ __forceinline int device_get_mindeg(int number_of_members, GPU_Data& dd)
 {
-    if (number_of_members < (*(device_data.minimum_clique_size))) {
-        return device_data.minimum_degrees[(*(device_data.minimum_clique_size))];
+    if (number_of_members < (*(dd.minimum_clique_size))) {
+        return dd.minimum_degrees[(*(dd.minimum_clique_size))];
     }
     else {
-        return device_data.minimum_degrees[number_of_members];
+        return dd.minimum_degrees[number_of_members];
     }
 }
 
