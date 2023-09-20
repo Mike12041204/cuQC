@@ -23,7 +23,7 @@ using namespace std;
 
 // global memory size: 1.500.000.000 ints
 #define TASKS_SIZE 15000000
-#define EXPAND_THRESHOLD 88
+#define EXPAND_THRESHOLD 286
 #define BUFFER_SIZE 100000000
 #define BUFFER_OFFSET_SIZE 1000000
 #define CLIQUES_SIZE 50000000
@@ -33,14 +33,14 @@ using namespace std;
 // per warp
 #define WCLIQUES_SIZE 50000
 #define WCLIQUES_OFFSET_SIZE 500
-#define WTASKS_SIZE 2000000
+#define WTASKS_SIZE 1000000
 #define WTASKS_OFFSET_SIZE 5000
 #define WVERTICES_SIZE 40000
 
 // shared memory size: 12.300 ints
 #define VERTICES_SIZE 110
  
-#define BLOCK_SIZE 128
+#define BLOCK_SIZE 416
 #define NUM_OF_BLOCKS 22
 #define WARP_SIZE 32
 
@@ -370,6 +370,7 @@ int* minimum_degrees;
 
 // TODO - test program on larger graphs
 // TODO - increase thread usage by monitoring and improving memory usage
+// TODO - test if it would be beneficial to coalesce memory access in for loops throughout the program, check out cuts writing on this
 
 // MAIN
 int main(int argc, char* argv[])
@@ -473,7 +474,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
     //print_GPU_Data(dd);
     print_Data_Sizes(dd);
 
-    // UNSURE - are all device syncs are necessary? how does chkerr effect this
+    // TODO - check cuts for cudaDeviceSynchronize
     // EXPAND LEVEL
     cout << ">:BEGINNING EXPANSION" << endl;
     while (!(*host_data.maximal_expansion))
@@ -490,6 +491,8 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
         // DEBUG
         //print_WClique_Buffers(dd);
         //print_WTask_Buffers(dd);
+        print_Warp_Data_Sizes_Every(dd, 1);
+        //print_All_Warp_Data_Sizes_Every(dd, 1);
 
         // consolidate all the warp tasks/cliques buffers into the next global tasks array, buffer, and cliques
         transfer_buffers<<<NUM_OF_BLOCKS, BLOCK_SIZE>>>(dd);
@@ -512,19 +515,8 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
         //print_GPU_Data(dd);
         //print_GPU_Cliques(dd);
         print_Data_Sizes_Every(dd, 1);
-
-        // TODO - convert to methods
-        // DEBUG - print debug variables from on the GPU
-        //bool debug;
-        //chkerr(cudaMemcpy(&debug, dd.debug, sizeof(bool), cudaMemcpyDeviceToHost));
-        //if (debug) {
-        //    cout << "!!!DEBUG!!! " << endl;
-        //}
-        //chkerr(cudaMemset(dd.debug, false, sizeof(bool)));
-        //int idebug;
-        //chkerr(cudaMemcpy(&idebug, dd.idebug, sizeof(int), cudaMemcpyDeviceToHost));
-        //cout << "IDebug: " << idebug << flush;
-        //chkerr(cudaMemset(dd.idebug, 0, sizeof(int)));
+        //print_debug(dd);
+        //print_idebug(dd);
     }
 
     dump_cliques(host_cliques, dd, temp_results);
@@ -1514,12 +1506,10 @@ void print_Warp_Data_Sizes(GPU_Data& dd)
     int cliques_msize = 0;
 
     chkerr(cudaMemcpy(tasks_counts, dd.wtasks_count, sizeof(uint64_t) * number_of_warps, cudaMemcpyDeviceToHost));
-    for (int i = 0; i < number_of_warps; i++) {
-        chkerr(cudaMemcpy(tasks_sizes + i, dd.wtasks_offset + (i * WTASKS_OFFSET_SIZE) + tasks_counts[i], sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    }
     chkerr(cudaMemcpy(cliques_counts, dd.wcliques_count, sizeof(uint64_t) * number_of_warps, cudaMemcpyDeviceToHost));
     for (int i = 0; i < number_of_warps; i++) {
-        chkerr(cudaMemcpy(cliques_sizes + i, dd.wcliques_offset + (i * WTASKS_OFFSET_SIZE) + cliques_counts[i], sizeof(uint64_t), cudaMemcpyDeviceToHost));
+        chkerr(cudaMemcpy(tasks_sizes + i, dd.wtasks_offset + (i * WTASKS_OFFSET_SIZE) + tasks_counts[i], sizeof(uint64_t), cudaMemcpyDeviceToHost));
+        chkerr(cudaMemcpy(cliques_sizes + i, dd.wcliques_offset + (i * WCLIQUES_OFFSET_SIZE) + cliques_counts[i], sizeof(uint64_t), cudaMemcpyDeviceToHost));
     }
 
     for (int i = 0; i < number_of_warps; i++) {
@@ -1527,27 +1517,25 @@ void print_Warp_Data_Sizes(GPU_Data& dd)
         if (tasks_counts[i] > tasks_mcount) {
             tasks_mcount = tasks_counts[i];
         }
-    }
-    for (int i = 0; i < number_of_warps; i++) {
         tasks_tsize += tasks_sizes[i];
         if (tasks_sizes[i] > tasks_msize) {
             tasks_msize = tasks_sizes[i];
         }
-    }
-    for (int i = 0; i < number_of_warps; i++) {
         cliques_tcount += cliques_counts[i];
         if (cliques_counts[i] > cliques_mcount) {
             cliques_mcount = cliques_counts[i];
         }
-    }
-    for (int i = 0; i < number_of_warps; i++) {
         cliques_tsize += cliques_sizes[i];
         if (cliques_sizes[i] > cliques_msize) {
             cliques_msize = cliques_sizes[i];
         }
     }
 
-    cout << "WTasks( TC: " << tasks_tcount << " TS: " << tasks_tsize << " MC: " << tasks_mcount << " MS: " << tasks_mcount << ") WCliques ( TC: " << cliques_tcount << " TS: " << cliques_tsize << " MC: " << cliques_mcount << " MS: " << cliques_mcount << ")" << endl;
+    cout << "WTasks( TC: " << tasks_tcount << " TS: " << tasks_tsize << " MC: " << tasks_mcount << " MS: " << tasks_msize << ") WCliques ( TC: " << cliques_tcount << " TS: " << cliques_tsize << " MC: " << cliques_mcount << " MS: " << cliques_msize << ")" << endl;
+
+    if (tasks_mcount > WTASKS_OFFSET_SIZE || tasks_msize > WTASKS_OFFSET_SIZE || cliques_mcount > WCLIQUES_OFFSET_SIZE || cliques_msize > WCLIQUES_SIZE) {
+        cout << "!!! WBUFFER SIZE ERROR !!!" << endl;
+    }
 
     delete tasks_counts;
     delete tasks_sizes;
@@ -1555,10 +1543,36 @@ void print_Warp_Data_Sizes(GPU_Data& dd)
     delete cliques_sizes;
 }
 
-// TODO - complete method
+// CURSOR - test this method, then run program on larger data sets
 void print_All_Warp_Data_Sizes(GPU_Data& dd)
 {
+    int number_of_warps = (NUM_OF_BLOCKS * BLOCK_SIZE) / WARP_SIZE;
 
+    uint64_t* tasks_counts = new uint64_t[number_of_warps];
+    uint64_t* tasks_sizes = new uint64_t[number_of_warps];
+    uint64_t* cliques_counts = new uint64_t[number_of_warps];
+    uint64_t* cliques_sizes = new uint64_t[number_of_warps];
+
+    chkerr(cudaMemcpy(tasks_counts, dd.wtasks_count, sizeof(uint64_t) * number_of_warps, cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(cliques_counts, dd.wcliques_count, sizeof(uint64_t) * number_of_warps, cudaMemcpyDeviceToHost));
+    for (int i = 0; i < number_of_warps; i++) {
+        chkerr(cudaMemcpy(tasks_sizes + i, dd.wtasks_offset + (i * WTASKS_OFFSET_SIZE) + tasks_counts[i], sizeof(uint64_t), cudaMemcpyDeviceToHost));
+        chkerr(cudaMemcpy(cliques_sizes + i, dd.wcliques_offset + (i * WCLIQUES_OFFSET_SIZE) + cliques_counts[i], sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    }
+
+    cout << "WTasks Sizes: " << flush;
+    for (int i = 0; i < number_of_warps; i++) {
+        cout << i << ":" << tasks_counts[i] << " " << tasks_sizes[i] << " " << flush;
+    }
+    cout << "\nWCliques Sizez: " << flush;
+    for (int i = 0; i < number_of_warps; i++) {
+        cout << i << ":" << cliques_counts[i] << " " << cliques_sizes[i] << " " << flush;
+    }
+
+    delete tasks_counts;
+    delete tasks_sizes;
+    delete cliques_counts;
+    delete cliques_sizes;
 }
 
 void print_Warp_Data_Sizes_Every(GPU_Data& dd, int every)
@@ -1579,16 +1593,22 @@ void print_All_Warp_Data_Sizes_Every(GPU_Data& dd, int every)
     }
 }
 
-// TODO - complete method
 void print_debug(GPU_Data& dd)
 {
-
+    bool debug;
+    chkerr(cudaMemcpy(&debug, dd.debug, sizeof(bool), cudaMemcpyDeviceToHost));
+    if (debug) {
+        cout << "!!!DEBUG!!! " << endl;
+    }
+    chkerr(cudaMemset(dd.debug, false, sizeof(bool)));
 }
 
-// TODO - complete method
 void print_idebug(GPU_Data& dd)
 {
-
+    int idebug;
+    chkerr(cudaMemcpy(&idebug, dd.idebug, sizeof(int), cudaMemcpyDeviceToHost));
+    cout << "IDebug: " << idebug << flush;
+    chkerr(cudaMemset(dd.idebug, 0, sizeof(int)));
 }
 
 void print_Data_Sizes_Every(GPU_Data& dd, int every)
@@ -1624,14 +1644,6 @@ void print_Data_Sizes(GPU_Data& dd)
 
     cout << "L: " << (*current_level) << " T1: " << (*tasks1_count) << " " << (*tasks1_size) << " T2: " << (*tasks2_count) << " " << (*tasks2_size) << " B: " << (*buffer_count) << " " << (*buffer_size) << " C: " << 
         (*cliques_count) << " " << (*cliques_size) << endl;
-
-    if (*current_level > 1 && *buffer_count != 0) {
-        uint64_t* bs0 = new uint64_t;
-        uint64_t* bs1 = new uint64_t;
-        chkerr(cudaMemcpy(bs0, dd.buffer_offset + (*buffer_count) - 1, sizeof(uint64_t), cudaMemcpyDeviceToHost));
-        chkerr(cudaMemcpy(bs1, dd.buffer_offset + (*buffer_count) + 1, sizeof(uint64_t), cudaMemcpyDeviceToHost));
-        cout << "BS0: " << (*bs0) << " BS1: " << (*bs1) << endl;
-    }
 
     delete current_level;
     delete tasks1_count;
@@ -1884,7 +1896,6 @@ __global__ void expand_level(GPU_Data dd)
         {
 
 
-            // UNSURE - almost certain we don't need to check for clique if failed found, but work through with Guo
             // REMOVE ONE VERTEX
             if (j > 0) {
                 method_return = remove_one_vertex(dd, wd, ld);
@@ -1962,7 +1973,6 @@ __global__ void expand_level(GPU_Data dd)
     }
 }
 
-// BUG - 
 __global__ void transfer_buffers(GPU_Data dd)
 {
     // THREAD INFO
@@ -2318,8 +2328,7 @@ __device__ void write_to_tasks(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     }
     if ((ld.idx % WARP_SIZE) == 0) {
         (dd.wtasks_count[(ld.idx / WARP_SIZE)])++;
-        dd.wtasks_offset[(WTASKS_OFFSET_SIZE * (ld.idx / WARP_SIZE)) + (dd.wtasks_count[(ld.idx / WARP_SIZE)])] = start_write - (WTASKS_SIZE * (ld.idx / WARP_SIZE)) +
-            wd.total_vertices[ld.warp_in_block_idx];
+        dd.wtasks_offset[(WTASKS_OFFSET_SIZE * (ld.idx / WARP_SIZE)) + (dd.wtasks_count[(ld.idx / WARP_SIZE)])] = start_write - (WTASKS_SIZE * (ld.idx / WARP_SIZE)) + wd.total_vertices[ld.warp_in_block_idx];
     }
 }
 
@@ -2612,6 +2621,7 @@ __device__ void calculate_LU_bounds(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     }
     __syncwarp();
 }
+
 
 
 // --- HELPER KERNELS ---
