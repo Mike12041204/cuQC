@@ -1533,7 +1533,7 @@ void print_Warp_Data_Sizes(GPU_Data& dd)
 
     cout << "WTasks( TC: " << tasks_tcount << " TS: " << tasks_tsize << " MC: " << tasks_mcount << " MS: " << tasks_msize << ") WCliques ( TC: " << cliques_tcount << " TS: " << cliques_tsize << " MC: " << cliques_mcount << " MS: " << cliques_msize << ")" << endl;
 
-    if (tasks_mcount > WTASKS_OFFSET_SIZE || tasks_msize > WTASKS_OFFSET_SIZE || cliques_mcount > WCLIQUES_OFFSET_SIZE || cliques_msize > WCLIQUES_SIZE) {
+    if (tasks_mcount > WTASKS_OFFSET_SIZE || tasks_msize > WTASKS_SIZE || cliques_mcount > WCLIQUES_OFFSET_SIZE || cliques_msize > WCLIQUES_SIZE) {
         cout << "!!! WBUFFER SIZE ERROR !!!" << endl;
     }
 
@@ -2276,7 +2276,6 @@ __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
         return 1;
     }
 
-    // TODO - test if we need to check vertex sets that have invalid bounds, dont think so
     // if vertex in x found as not extendable continue to next iteration
     if (failed_found || wd.invalid_bounds[ld.warp_in_block_idx]) {
         return 2;
