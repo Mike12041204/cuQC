@@ -346,13 +346,16 @@ __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
 __device__ void check_for_clique(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
 __device__ void write_to_tasks(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
 __device__ void diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, int pvertexid);
-__device__ void degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, bool& failed_found);
+__device__ bool degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
 __device__ void update_degrees(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, int number_of_removed_candidates);
 __device__ void calculate_LU_bounds(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
 
 __device__ void degree_pruning_nonLU(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, bool& failed_found);
-__device__ void device_sort(Vertex* target, int size, int lane_idx);
+__device__ void device_sort(Vertex* target, int size, int lane_idx, int (*func)(Vertex&, Vertex&));
 __device__ __forceinline int sort_vert(Vertex& vertex1, Vertex& vertex2);
+__device__ __forceinline int sort_vert_cc(Vertex& vertex1, Vertex& vertex2);
+__device__ __forceinline int sort_vert_cp(Vertex& vertex1, Vertex& vertex2);
+__device__ __forceinline int sort_vert_cco(Vertex& vertex1, Vertex& vertex2);
 __device__ int device_bsearch_array(int* search_array, int array_size, int search_number);
 __device__ __forceinline bool device_cand_isvalid(Vertex& vertex, int number_of_members, GPU_Data& dd);
 __device__ __forceinline bool device_cand_isvalid_LU(Vertex& vertex, GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
@@ -360,17 +363,20 @@ __device__ __forceinline bool device_vert_isextendable(Vertex& vertex, int numbe
 __device__ __forceinline bool device_vert_isextendable_LU(Vertex& vertex, GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
 __device__ __forceinline int device_get_mindeg(int number_of_members, GPU_Data& dd);
 
-// TODO - make local
+
+
+// TODO - test program on larger graphs
+// TODO - increase thread usage by monitoring and improving memory usage
+// TODO - test if it would be beneficial to coalesce memory access in for loops throughout the program, check out cuts writing on this
+
+
+
 // INPUT SETTINGS
 double minimum_degree_ratio;
 int minimum_clique_size;
 int* minimum_degrees;
 
 
-
-// TODO - test program on larger graphs
-// TODO - increase thread usage by monitoring and improving memory usage
-// TODO - test if it would be beneficial to coalesce memory access in for loops throughout the program, check out cuts writing on this
 
 // MAIN
 int main(int argc, char* argv[])
@@ -474,7 +480,6 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
     //print_GPU_Data(dd);
     print_Data_Sizes(dd);
 
-    // TODO - check cuts for cudaDeviceSynchronize
     // EXPAND LEVEL
     cout << ">:BEGINNING EXPANSION" << endl;
     while (!(*host_data.maximal_expansion))
@@ -2040,30 +2045,26 @@ __global__ void transfer_buffers(GPU_Data dd)
     }
     __syncwarp();
 
-    // TODO - for the next two blocks use two for loops rather than a conditional
+    // UPDATED - for the next two blocks use two for loops rather than a conditional
     // move to tasks and buffer
-    for (int i = (idx % WARP_SIZE) + 1; i <= dd.wtasks_count[(idx / WARP_SIZE)]; i += WARP_SIZE)
-    {
-        if (tasks_offset_write[warp_in_block_idx] + i - 1 <= EXPAND_THRESHOLD) {
-            // to tasks
-            write_offsets[tasks_offset_write[warp_in_block_idx] + i - 1] = dd.wtasks_offset[(WTASKS_OFFSET_SIZE * (idx / WARP_SIZE)) + i] + tasks_write[warp_in_block_idx];
-        }
-        else {
-            // to buffer
-            dd.buffer_offset[tasks_offset_write[warp_in_block_idx] + i - 2 - EXPAND_THRESHOLD + (*(dd.buffer_offset_start))] = dd.wtasks_offset[(WTASKS_OFFSET_SIZE * (idx / WARP_SIZE)) + i] + 
-                tasks_write[warp_in_block_idx] - tasks_end + (*(dd.buffer_start));
-        }
+    int i;
+    for (i = (idx % WARP_SIZE) + 1; i <= EXPAND_THRESHOLD+1-tasks_offset_write[warp_in_block_idx]; i += WARP_SIZE){
+        // to tasks
+        write_offsets[tasks_offset_write[warp_in_block_idx] + i - 1] = dd.wtasks_offset[(WTASKS_OFFSET_SIZE * (idx / WARP_SIZE)) + i] + tasks_write[warp_in_block_idx];
+    }
+    for ( ; i <= dd.wtasks_count[(idx / WARP_SIZE)]; i += WARP_SIZE){
+        // to buffer
+        dd.buffer_offset[tasks_offset_write[warp_in_block_idx] + i - 2 - EXPAND_THRESHOLD + (*(dd.buffer_offset_start))] = dd.wtasks_offset[(WTASKS_OFFSET_SIZE * (idx / WARP_SIZE)) + i] +
+            tasks_write[warp_in_block_idx] - tasks_end + (*(dd.buffer_start));
     }
 
-    for (int i = (idx % WARP_SIZE); i < dd.wtasks_offset[(WTASKS_OFFSET_SIZE * (idx / WARP_SIZE)) + dd.wtasks_count[(idx / WARP_SIZE)]]; i += WARP_SIZE) {
-        if (tasks_write[warp_in_block_idx] + i < tasks_end) {
-            // to tasks
-            write_vertices[tasks_write[warp_in_block_idx] + i] = dd.wtasks_vertices[(WTASKS_SIZE * (idx / WARP_SIZE)) + i];
-        }
-        else {
-            // to buffer
-            dd.buffer_vertices[(*(dd.buffer_start)) + tasks_write[warp_in_block_idx] + i - tasks_end] = dd.wtasks_vertices[(WTASKS_SIZE * (idx / WARP_SIZE)) + i];
-        }
+    for (i = (idx % WARP_SIZE); i < tasks_end-tasks_write[warp_in_block_idx]; i += WARP_SIZE) {
+        // to tasks
+        write_vertices[tasks_write[warp_in_block_idx] + i] = dd.wtasks_vertices[(WTASKS_SIZE * (idx / WARP_SIZE)) + i];
+    }
+    for ( ; i < dd.wtasks_offset[(WTASKS_OFFSET_SIZE * (idx / WARP_SIZE)) + dd.wtasks_count[(idx / WARP_SIZE)]]; i += WARP_SIZE) {
+        // to buffer
+        dd.buffer_vertices[(*(dd.buffer_start)) + tasks_write[warp_in_block_idx] + i - tasks_end] = dd.wtasks_vertices[(WTASKS_SIZE * (idx / WARP_SIZE)) + i];
     }
 
     //move to cliques
@@ -2234,6 +2235,7 @@ __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 {
     int pvertexid;
     bool failed_found;
+    Vertex temp;
 
     if ((ld.idx % WARP_SIZE) == 0) {
         ld.vertices[wd.total_vertices[ld.warp_in_block_idx] - 1].label = 1;
@@ -2252,9 +2254,12 @@ __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     }
     __syncwarp();
 
-    // TODO - this might be able to be hard coded rather than sorted
-    // sort new vertices putting just added vertex at end of all vertices in x
-    device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx] - 1, wd.number_of_candidates[ld.warp_in_block_idx] + 1, (ld.idx % WARP_SIZE));
+    // UPDATED
+    // put just added vertex at end of all vertices in x
+    device_sort()
+    temp = ld.vertices[wd.number_of_members[ld.warp_in_block_idx]];
+    ld.vertices[wd.number_of_members[ld.warp_in_block_idx]] = ld.vertices[wd.total_vertices[ld.warp_in_block_idx]];
+    ld.vertices[wd.total_vertices[ld.warp_in_block_idx]] = temp;
 
 
 
@@ -2268,8 +2273,9 @@ __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
 
 
+    // UPDATED
     // DEGREE BASED PRUNING
-    degree_pruning(dd, wd, ld, failed_found);
+    failed_found = degree_pruning(dd, wd, ld);
 
     // continue if not enough vertices after pruning
     if (wd.total_vertices[ld.warp_in_block_idx] < (*(dd.minimum_clique_size))) {
@@ -2280,6 +2286,10 @@ __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     if (failed_found || wd.invalid_bounds[ld.warp_in_block_idx]) {
         return 2;
     }
+
+    // UPDATED
+    // if clique hasnt returned by now, it will be written to tasks later in program and thus must sorted in specific order to ensure proper traversal of the enumeration tree
+    device_sort(ld.vertices, wd.total_vertices[ld.warp_in_block_idx], (ld.idx % WARP_SIZE), sort_vert_cco);
     
     return 0;
 }
@@ -2345,7 +2355,8 @@ __device__ void diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, in
     for (int k = 1; k < 32; k *= 2) {
         number_of_removed_candidates += __shfl_xor_sync(0xFFFFFFFF, number_of_removed_candidates, k);
     }
-    device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx], wd.number_of_candidates[ld.warp_in_block_idx], (ld.idx % WARP_SIZE));
+    // UPDATED
+    device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx], wd.number_of_candidates[ld.warp_in_block_idx], (ld.idx % WARP_SIZE), sort_vert_cp);
 
     // update exdeg of vertices connected to removed cands
     update_degrees(dd, wd, ld, number_of_removed_candidates);
@@ -2357,9 +2368,9 @@ __device__ void diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, in
     __syncwarp();
 }
 
-// TODO - return failed_found rather than use a reference
-__device__ void degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, bool& failed_found)
+__device__ bool degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 {
+    bool failed_found;
     int number_of_removed_candidates;
 
     do
@@ -2396,7 +2407,8 @@ __device__ void degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, bool
         for (int k = 1; k < 32; k *= 2) {
             number_of_removed_candidates += __shfl_xor_sync(0xFFFFFFFF, number_of_removed_candidates, k);
         }
-        device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx], wd.number_of_candidates[ld.warp_in_block_idx], (ld.idx % WARP_SIZE));
+        // UPDATED
+        device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx], wd.number_of_candidates[ld.warp_in_block_idx], (ld.idx % WARP_SIZE), sort_vert_cp);
 
         // update exdeg of vertices connected to removed cands
         update_degrees(dd, wd, ld, number_of_removed_candidates);
@@ -2407,6 +2419,8 @@ __device__ void degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, bool
         }
         __syncwarp();
     } while (number_of_removed_candidates > 0);
+
+    return failed_found;
 }
 
 __device__ void update_degrees(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, int number_of_removed_candidates)
@@ -2449,7 +2463,6 @@ __device__ void update_degrees(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, int 
     }
 }
 
-// TODO - try to parallelize as much calculation as possible
 __device__ void calculate_LU_bounds(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 {
     int index;
@@ -2657,7 +2670,7 @@ __device__ void degree_pruning_nonLU(GPU_Data& dd, Warp_Data& wd, Local_Data& ld
         for (int k = 1; k < 32; k *= 2) {
             number_of_removed_candidates += __shfl_xor_sync(0xFFFFFFFF, number_of_removed_candidates, k);
         }
-        device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx], wd.number_of_candidates[ld.warp_in_block_idx], (ld.idx % WARP_SIZE));
+        device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx], wd.number_of_candidates[ld.warp_in_block_idx], (ld.idx % WARP_SIZE), sort_vert_cp);
 
         // update exdeg of vertices connected to removed cands
         update_degrees(dd, wd, ld, number_of_removed_candidates);
@@ -2670,8 +2683,8 @@ __device__ void degree_pruning_nonLU(GPU_Data& dd, Warp_Data& wd, Local_Data& ld
     } while (number_of_removed_candidates > 0);
 }
 
-// TODO - convert to merge or radix sort, merge is recursive
-__device__ void device_sort(Vertex* target, int size, int lane_idx)
+// UPDATED
+__device__ void device_sort(Vertex* target, int size, int lane_idx, int (*func)(Vertex&, Vertex&))
 {
     // ALGO - ODD/EVEN
     // TYPE - PARALLEL
@@ -2682,7 +2695,7 @@ __device__ void device_sort(Vertex* target, int size, int lane_idx)
             Vertex vertex1 = target[j];
             Vertex vertex2 = target[j + 1];
 
-            if (sort_vert(vertex1, vertex2) == 1) {
+            if (func(vertex1, vertex2) == 1) {
                 target[j] = target[j + 1];
                 target[j + 1] = vertex1;
             }
@@ -2691,7 +2704,7 @@ __device__ void device_sort(Vertex* target, int size, int lane_idx)
     }
 }
 
-// TODO - clean up method
+// REMOVE
 __device__ __forceinline int sort_vert(Vertex& vertex1, Vertex& vertex2)
 {
     // order is: in clique -> covered -> critical adj vertices -> cands -> cover -> pruned
@@ -2774,6 +2787,67 @@ __device__ __forceinline int sort_vert(Vertex& vertex1, Vertex& vertex2)
         return 0;
     }
     return 0;
+}
+
+// REMOVE
+__device__ __forceinline int sort_vert_cc(Vertex& vertex1, Vertex& vertex2)
+{
+    // order is: in clique -> candidates
+
+    if (vertex1.label == 1 && vertex2.label != 1) {
+        return -1;
+    }
+    else if (vertex1.label != 1 && vertex2.label == 1) {
+        return 1;
+    }
+    else {
+        return 0;
+    }
+}
+
+// sort vetices only considering in clique, candidates, and pruned vertices
+__device__ __forceinline int sort_vert_cp(Vertex& vertex1, Vertex& vertex2)
+{
+    // order is: cands -> pruned
+
+    if (vertex1.label == 0 && vertex2.label != 0) {
+        return -1;
+    }
+    else if (vertex1.label != 0 && vertex2.label == 0) {
+        return 1;
+    }
+    else {
+        return 0;
+    }
+}
+
+// sort vertices only considering in clique and candidates maintaining an order for them
+__device__ __forceinline int sort_vert_cco(Vertex& vertex1, Vertex& vertex2)
+{
+    // order is: in clique -> cands
+
+    // in clique
+    if (vertex1.label == 1 && vertex2.label != 1) {
+        return -1;
+    }
+    else if (vertex1.label != 1 && vertex2.label == 1) {
+        return 1;
+    }
+    // for ties: in cand high -> low
+    else if (vertex1.label == 0 && vertex2.label == 0) {
+        if (vertex1.vertexid > vertex2.vertexid) {
+            return 1;
+        }
+        else if (vertex1.vertexid < vertex2.vertexid) {
+            return -1;
+        }
+        else {
+            return 0;
+        }
+    }
+    else{
+         return 0;
+    }
 }
 
 // searches an int array for a certain int, returns the position in the array that item was found, or -1 if not found
@@ -2873,7 +2947,6 @@ __device__ __forceinline bool device_vert_isextendable_LU(Vertex& vertex, GPU_Da
     else if (vertex.indeg + vertex.exdeg < wd.minimum_external_degree[ld.warp_in_block_idx]) {
         return false;
     }
-    // TODO - I think this else if is useless
     else if (vertex.exdeg == 0 && vertex.indeg < device_get_mindeg(wd.number_of_members[ld.warp_in_block_idx] + vertex.exdeg, dd)) {
         return false;
     }
