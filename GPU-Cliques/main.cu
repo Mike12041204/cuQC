@@ -2256,10 +2256,10 @@ __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
     // UPDATED
     // put just added vertex at end of all vertices in x
-    device_sort()
-    temp = ld.vertices[wd.number_of_members[ld.warp_in_block_idx]];
-    ld.vertices[wd.number_of_members[ld.warp_in_block_idx]] = ld.vertices[wd.total_vertices[ld.warp_in_block_idx]];
-    ld.vertices[wd.total_vertices[ld.warp_in_block_idx]] = temp;
+    device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx] - 1, wd.number_of_candidates[ld.warp_in_block_idx] + 1, (ld.idx % WARP_SIZE), sort_vert);
+    //temp = ld.vertices[wd.number_of_members[ld.warp_in_block_idx]];
+    //ld.vertices[wd.number_of_members[ld.warp_in_block_idx]] = ld.vertices[wd.total_vertices[ld.warp_in_block_idx]];
+    //ld.vertices[wd.total_vertices[ld.warp_in_block_idx]] = temp;
 
 
 
@@ -2289,7 +2289,7 @@ __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
     // UPDATED
     // if clique hasnt returned by now, it will be written to tasks later in program and thus must sorted in specific order to ensure proper traversal of the enumeration tree
-    device_sort(ld.vertices, wd.total_vertices[ld.warp_in_block_idx], (ld.idx % WARP_SIZE), sort_vert_cco);
+    //device_sort(ld.vertices, wd.total_vertices[ld.warp_in_block_idx], (ld.idx % WARP_SIZE), sort_vert_cco);
     
     return 0;
 }
@@ -2356,7 +2356,8 @@ __device__ void diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, in
         number_of_removed_candidates += __shfl_xor_sync(0xFFFFFFFF, number_of_removed_candidates, k);
     }
     // UPDATED
-    device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx], wd.number_of_candidates[ld.warp_in_block_idx], (ld.idx % WARP_SIZE), sort_vert_cp);
+    device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx], wd.number_of_candidates[ld.warp_in_block_idx], (ld.idx % WARP_SIZE), sort_vert);
+    //device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx], wd.number_of_candidates[ld.warp_in_block_idx], (ld.idx % WARP_SIZE), sort_vert_cp);
 
     // update exdeg of vertices connected to removed cands
     update_degrees(dd, wd, ld, number_of_removed_candidates);
@@ -2408,7 +2409,8 @@ __device__ bool degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
             number_of_removed_candidates += __shfl_xor_sync(0xFFFFFFFF, number_of_removed_candidates, k);
         }
         // UPDATED
-        device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx], wd.number_of_candidates[ld.warp_in_block_idx], (ld.idx % WARP_SIZE), sort_vert_cp);
+        device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx], wd.number_of_candidates[ld.warp_in_block_idx], (ld.idx % WARP_SIZE), sort_vert);
+        //device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx], wd.number_of_candidates[ld.warp_in_block_idx], (ld.idx % WARP_SIZE), sort_vert_cp);
 
         // update exdeg of vertices connected to removed cands
         update_degrees(dd, wd, ld, number_of_removed_candidates);
