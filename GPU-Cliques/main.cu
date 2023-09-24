@@ -23,7 +23,7 @@ using namespace std;
 
 // global memory size: 1.500.000.000 ints
 #define TASKS_SIZE 15000000
-#define EXPAND_THRESHOLD 286
+#define EXPAND_THRESHOLD 440
 #define BUFFER_SIZE 100000000
 #define BUFFER_OFFSET_SIZE 1000000
 #define CLIQUES_SIZE 50000000
@@ -33,14 +33,14 @@ using namespace std;
 // per warp
 #define WCLIQUES_SIZE 50000
 #define WCLIQUES_OFFSET_SIZE 500
-#define WTASKS_SIZE 1000000
-#define WTASKS_OFFSET_SIZE 5000
+#define WTASKS_SIZE 100000
+#define WTASKS_OFFSET_SIZE 500
 #define WVERTICES_SIZE 40000
 
 // shared memory size: 12.300 ints
 #define VERTICES_SIZE 110
  
-#define BLOCK_SIZE 416
+#define BLOCK_SIZE 640
 #define NUM_OF_BLOCKS 22
 #define WARP_SIZE 32
 
@@ -352,8 +352,6 @@ __device__ void calculate_LU_bounds(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
 __device__ void degree_pruning_nonLU(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, bool& failed_found);
 __device__ void device_sort(Vertex* target, int size, int lane_idx, int (*func)(Vertex&, Vertex&));
-__device__ __forceinline int sort_vert(Vertex& vertex1, Vertex& vertex2);
-__device__ __forceinline int sort_vert_cc(Vertex& vertex1, Vertex& vertex2);
 __device__ __forceinline int sort_vert_cp(Vertex& vertex1, Vertex& vertex2);
 __device__ __forceinline int sort_vert_cco(Vertex& vertex1, Vertex& vertex2);
 __device__ int device_bsearch_array(int* search_array, int array_size, int search_number);
@@ -496,7 +494,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
         // DEBUG
         //print_WClique_Buffers(dd);
         //print_WTask_Buffers(dd);
-        print_Warp_Data_Sizes_Every(dd, 1);
+        //print_Warp_Data_Sizes_Every(dd, 1);
         //print_All_Warp_Data_Sizes_Every(dd, 1);
 
         // consolidate all the warp tasks/cliques buffers into the next global tasks array, buffer, and cliques
@@ -1492,7 +1490,6 @@ void print_GPU_Data(GPU_Data& dd)
     delete buffer_vertices;
 }
 
-// CURSOR - test this method, then run program on larger data sets
 void print_Warp_Data_Sizes(GPU_Data& dd)
 {
     int number_of_warps = (NUM_OF_BLOCKS * BLOCK_SIZE) / WARP_SIZE;
@@ -1548,7 +1545,6 @@ void print_Warp_Data_Sizes(GPU_Data& dd)
     delete cliques_sizes;
 }
 
-// CURSOR - test this method, then run program on larger data sets
 void print_All_Warp_Data_Sizes(GPU_Data& dd)
 {
     int number_of_warps = (NUM_OF_BLOCKS * BLOCK_SIZE) / WARP_SIZE;
@@ -2044,27 +2040,30 @@ __global__ void transfer_buffers(GPU_Data dd)
         }
     }
     __syncwarp();
-
-    // UPDATED - for the next two blocks use two for loops rather than a conditional
+    
     // move to tasks and buffer
-    int i;
-    for (i = (idx % WARP_SIZE) + 1; i <= EXPAND_THRESHOLD+1-tasks_offset_write[warp_in_block_idx]; i += WARP_SIZE){
-        // to tasks
-        write_offsets[tasks_offset_write[warp_in_block_idx] + i - 1] = dd.wtasks_offset[(WTASKS_OFFSET_SIZE * (idx / WARP_SIZE)) + i] + tasks_write[warp_in_block_idx];
-    }
-    for ( ; i <= dd.wtasks_count[(idx / WARP_SIZE)]; i += WARP_SIZE){
-        // to buffer
-        dd.buffer_offset[tasks_offset_write[warp_in_block_idx] + i - 2 - EXPAND_THRESHOLD + (*(dd.buffer_offset_start))] = dd.wtasks_offset[(WTASKS_OFFSET_SIZE * (idx / WARP_SIZE)) + i] +
-            tasks_write[warp_in_block_idx] - tasks_end + (*(dd.buffer_start));
+    for (int i = (idx % WARP_SIZE) + 1; i <= dd.wtasks_count[(idx / WARP_SIZE)]; i += WARP_SIZE)
+    {
+        if (tasks_offset_write[warp_in_block_idx] + i - 1 <= EXPAND_THRESHOLD) {
+            // to tasks
+            write_offsets[tasks_offset_write[warp_in_block_idx] + i - 1] = dd.wtasks_offset[(WTASKS_OFFSET_SIZE * (idx / WARP_SIZE)) + i] + tasks_write[warp_in_block_idx];
+        }
+        else {
+            // to buffer
+            dd.buffer_offset[tasks_offset_write[warp_in_block_idx] + i - 2 - EXPAND_THRESHOLD + (*(dd.buffer_offset_start))] = dd.wtasks_offset[(WTASKS_OFFSET_SIZE * (idx / WARP_SIZE)) + i] +
+                tasks_write[warp_in_block_idx] - tasks_end + (*(dd.buffer_start));
+        }
     }
 
-    for (i = (idx % WARP_SIZE); i < tasks_end-tasks_write[warp_in_block_idx]; i += WARP_SIZE) {
-        // to tasks
-        write_vertices[tasks_write[warp_in_block_idx] + i] = dd.wtasks_vertices[(WTASKS_SIZE * (idx / WARP_SIZE)) + i];
-    }
-    for ( ; i < dd.wtasks_offset[(WTASKS_OFFSET_SIZE * (idx / WARP_SIZE)) + dd.wtasks_count[(idx / WARP_SIZE)]]; i += WARP_SIZE) {
-        // to buffer
-        dd.buffer_vertices[(*(dd.buffer_start)) + tasks_write[warp_in_block_idx] + i - tasks_end] = dd.wtasks_vertices[(WTASKS_SIZE * (idx / WARP_SIZE)) + i];
+    for (int i = (idx % WARP_SIZE); i < dd.wtasks_offset[(WTASKS_OFFSET_SIZE * (idx / WARP_SIZE)) + dd.wtasks_count[(idx / WARP_SIZE)]]; i += WARP_SIZE) {
+        if (tasks_write[warp_in_block_idx] + i < tasks_end) {
+            // to tasks
+            write_vertices[tasks_write[warp_in_block_idx] + i] = dd.wtasks_vertices[(WTASKS_SIZE * (idx / WARP_SIZE)) + i];
+        }
+        else {
+            // to buffer
+            dd.buffer_vertices[(*(dd.buffer_start)) + tasks_write[warp_in_block_idx] + i - tasks_end] = dd.wtasks_vertices[(WTASKS_SIZE * (idx / WARP_SIZE)) + i];
+        }
     }
 
     //move to cliques
@@ -2235,7 +2234,6 @@ __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 {
     int pvertexid;
     bool failed_found;
-    Vertex temp;
 
     if ((ld.idx % WARP_SIZE) == 0) {
         ld.vertices[wd.total_vertices[ld.warp_in_block_idx] - 1].label = 1;
@@ -2254,12 +2252,8 @@ __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     }
     __syncwarp();
 
-    // UPDATED
-    // put just added vertex at end of all vertices in x
-    device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx] - 1, wd.number_of_candidates[ld.warp_in_block_idx] + 1, (ld.idx % WARP_SIZE), sort_vert);
-    //temp = ld.vertices[wd.number_of_members[ld.warp_in_block_idx]];
-    //ld.vertices[wd.number_of_members[ld.warp_in_block_idx]] = ld.vertices[wd.total_vertices[ld.warp_in_block_idx]];
-    //ld.vertices[wd.total_vertices[ld.warp_in_block_idx]] = temp;
+    // sort vertices putting just added vertex at end of all vertices in x
+    device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx] - 1, wd.number_of_candidates[ld.warp_in_block_idx] + 1, (ld.idx % WARP_SIZE), sort_vert_cco);
 
 
 
@@ -2273,7 +2267,6 @@ __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
 
 
-    // UPDATED
     // DEGREE BASED PRUNING
     failed_found = degree_pruning(dd, wd, ld);
 
@@ -2286,11 +2279,7 @@ __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     if (failed_found || wd.invalid_bounds[ld.warp_in_block_idx]) {
         return 2;
     }
-
-    // UPDATED
-    // if clique hasnt returned by now, it will be written to tasks later in program and thus must sorted in specific order to ensure proper traversal of the enumeration tree
-    //device_sort(ld.vertices, wd.total_vertices[ld.warp_in_block_idx], (ld.idx % WARP_SIZE), sort_vert_cco);
-    
+   
     return 0;
 }
 
@@ -2355,9 +2344,7 @@ __device__ void diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, in
     for (int k = 1; k < 32; k *= 2) {
         number_of_removed_candidates += __shfl_xor_sync(0xFFFFFFFF, number_of_removed_candidates, k);
     }
-    // UPDATED
-    device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx], wd.number_of_candidates[ld.warp_in_block_idx], (ld.idx % WARP_SIZE), sort_vert);
-    //device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx], wd.number_of_candidates[ld.warp_in_block_idx], (ld.idx % WARP_SIZE), sort_vert_cp);
+    device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx], wd.number_of_candidates[ld.warp_in_block_idx], (ld.idx % WARP_SIZE), sort_vert_cp);
 
     // update exdeg of vertices connected to removed cands
     update_degrees(dd, wd, ld, number_of_removed_candidates);
@@ -2408,9 +2395,7 @@ __device__ bool degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
         for (int k = 1; k < 32; k *= 2) {
             number_of_removed_candidates += __shfl_xor_sync(0xFFFFFFFF, number_of_removed_candidates, k);
         }
-        // UPDATED
-        device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx], wd.number_of_candidates[ld.warp_in_block_idx], (ld.idx % WARP_SIZE), sort_vert);
-        //device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx], wd.number_of_candidates[ld.warp_in_block_idx], (ld.idx % WARP_SIZE), sort_vert_cp);
+        device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx], wd.number_of_candidates[ld.warp_in_block_idx], (ld.idx % WARP_SIZE), sort_vert_cp);
 
         // update exdeg of vertices connected to removed cands
         update_degrees(dd, wd, ld, number_of_removed_candidates);
@@ -2706,107 +2691,6 @@ __device__ void device_sort(Vertex* target, int size, int lane_idx, int (*func)(
     }
 }
 
-// REMOVE
-__device__ __forceinline int sort_vert(Vertex& vertex1, Vertex& vertex2)
-{
-    // order is: in clique -> covered -> critical adj vertices -> cands -> cover -> pruned
-
-    // in clique
-    if (vertex1.label == 1 && vertex2.label != 1) {
-        return -1;
-    }
-    else if (vertex1.label != 1 && vertex2.label == 1) {
-        return 1;
-
-    // covered candidate vertices
-    }
-    else if (vertex1.label == 2 && vertex2.label != 2) {
-        return -1;
-    }
-    else if (vertex1.label != 2 && vertex2.label == 2) {
-        return 1;
-
-    // critical adjacent candidate vertices
-    }
-    else if (vertex1.label == 4 && vertex2.label != 4) {
-        return -1;
-    }
-    else if (vertex1.label != 4 && vertex2.label == 4) {
-        return 1;
-
-    // candidate vertices
-    }
-    else if (vertex1.label == 0 && vertex2.label != 0) {
-        return -1;
-    }
-    else if (vertex1.label != 0 && vertex2.label == 0) {
-        return 1;
-
-    // the cover vertex
-    }
-    else if (vertex1.label == 3 && vertex2.label != 3) {
-        return -1;
-    }
-    else if (vertex1.label != 3 && vertex2.label == 3) {
-        return 1;
-
-    // vertices that have been pruned
-    }
-    else if (vertex1.label == -1 && vertex2.label != 1) {
-        return 1;
-    }
-    else if (vertex1.label != -1 && vertex2.label == -1) {
-        return -1;
-    }
-
-    // for ties: in clique low -> high, cand high -> low
-    else if (vertex1.label == 1 && vertex2.label == 1) {
-        if (vertex1.vertexid > vertex2.vertexid) {
-            return 1;
-        }
-        else if (vertex1.vertexid < vertex2.vertexid) {
-            return -1;
-        }
-        else {
-            return 0;
-        }
-    }
-    else if (vertex1.label == 0 && vertex2.label == 0) {
-        if (vertex1.vertexid > vertex2.vertexid) {
-            return -1;
-        }
-        else if (vertex1.vertexid < vertex2.vertexid) {
-            return 1;
-        }
-        else {
-            return 0;
-        }
-    }
-    else if (vertex1.label == 2 && vertex2.label == 2) {
-        return 0;
-    }
-    else if (vertex1.label == -1 && vertex2.label == -1) {
-        return 0;
-    }
-    return 0;
-}
-
-// REMOVE
-__device__ __forceinline int sort_vert_cc(Vertex& vertex1, Vertex& vertex2)
-{
-    // order is: in clique -> candidates
-
-    if (vertex1.label == 1 && vertex2.label != 1) {
-        return -1;
-    }
-    else if (vertex1.label != 1 && vertex2.label == 1) {
-        return 1;
-    }
-    else {
-        return 0;
-    }
-}
-
 // sort vetices only considering in clique, candidates, and pruned vertices
 __device__ __forceinline int sort_vert_cp(Vertex& vertex1, Vertex& vertex2)
 {
@@ -2836,19 +2720,19 @@ __device__ __forceinline int sort_vert_cco(Vertex& vertex1, Vertex& vertex2)
         return 1;
     }
     // for ties: in cand high -> low
-    else if (vertex1.label == 0 && vertex2.label == 0) {
+    else if(vertex1.label == 0 && vertex2.label == 0) {
         if (vertex1.vertexid > vertex2.vertexid) {
-            return 1;
+            return -1;
         }
         else if (vertex1.vertexid < vertex2.vertexid) {
-            return -1;
+            return 1;
         }
         else {
             return 0;
         }
     }
-    else{
-         return 0;
+    else {
+        return 0;
     }
 }
 
