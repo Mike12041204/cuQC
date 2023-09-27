@@ -2260,7 +2260,7 @@ __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
     // more efficient shift to put just added vertex at the end of all vertices in x
     if ((ld.idx % WARP_SIZE) == 0) {
-        for (int i = wd.total_vertices[ld.warp_in_block_idx] - 1; i > wd.number_of_members[ld.warp_in_block_idx] - 2; i--) {
+        for (int i = wd.total_vertices[ld.warp_in_block_idx] - 1; i > wd.number_of_members[ld.warp_in_block_idx] - 1; i--) {
             Vertex temp = ld.vertices[i];
             ld.vertices[i] = ld.vertices[i - 1];
             ld.vertices[i - 1] = temp;
