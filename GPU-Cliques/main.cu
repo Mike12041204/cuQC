@@ -23,7 +23,7 @@ using namespace std;
 
 // global memory size: 1.500.000.000 ints
 #define TASKS_SIZE 15000000
-#define EXPAND_THRESHOLD 4400
+#define EXPAND_THRESHOLD 44000
 #define BUFFER_SIZE 100000000
 #define BUFFER_OFFSET_SIZE 1000000
 #define CLIQUES_SIZE 50000000
@@ -353,7 +353,7 @@ __device__ void calculate_LU_bounds(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 __device__ void degree_pruning_nonLU(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, bool& failed_found);
 __device__ void device_sort(Vertex* target, int size, int lane_idx, int (*func)(Vertex&, Vertex&));
 __device__ __forceinline int sort_vert_cp(Vertex& vertex1, Vertex& vertex2);
-__device__ __forceinline int sort_vert_cco(Vertex& vertex1, Vertex& vertex2);
+__device__ __forceinline int sort_vert_cc(Vertex& vertex1, Vertex& vertex2);
 __device__ int device_bsearch_array(int* search_array, int array_size, int search_number);
 __device__ __forceinline bool device_cand_isvalid(Vertex& vertex, int number_of_members, GPU_Data& dd);
 __device__ __forceinline bool device_cand_isvalid_LU(Vertex& vertex, GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
@@ -515,7 +515,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
         }
 
         // DEBUG
-        print_GPU_Data(dd);
+        //print_GPU_Data(dd);
         //print_GPU_Cliques(dd);
         //print_Data_Sizes_Every(dd, 1);
         //print_debug(dd);
@@ -2234,6 +2234,8 @@ __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 {
     int pvertexid;
     bool failed_found;
+    Vertex member;
+    Vertex candidate;
 
     if ((ld.idx % WARP_SIZE) == 0) {
         ld.vertices[wd.total_vertices[ld.warp_in_block_idx] - 1].label = 1;
@@ -2252,8 +2254,19 @@ __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     }
     __syncwarp();
 
+    // !!! NEW !!!
     // sort vertices putting just added vertex at end of all vertices in x
-    device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx] - 1, wd.number_of_candidates[ld.warp_in_block_idx] + 1, (ld.idx % WARP_SIZE), sort_vert_cco);
+    //device_sort(ld.vertices + wd.number_of_members[ld.warp_in_block_idx] - 1, wd.number_of_candidates[ld.warp_in_block_idx] + 1, (ld.idx % WARP_SIZE), sort_vert_cc);
+
+    // more efficient shift to put just added vertex at the end of all vertices in x
+    if ((ld.idx % WARP_SIZE) == 0) {
+        for (int i = wd.total_vertices[ld.warp_in_block_idx] - 1; i > wd.number_of_members[ld.warp_in_block_idx] - 2; i--) {
+            Vertex temp = ld.vertices[i];
+            ld.vertices[i] = ld.vertices[i - 1];
+            ld.vertices[i - 1] = temp;
+        }
+    }
+    __syncwarp();
 
 
 
@@ -2707,8 +2720,8 @@ __device__ __forceinline int sort_vert_cp(Vertex& vertex1, Vertex& vertex2)
     }
 }
 
-// sort vertices only considering in clique and candidates maintaining an order for them
-__device__ __forceinline int sort_vert_cco(Vertex& vertex1, Vertex& vertex2)
+// sort vertices only considering in clique and candidates
+__device__ __forceinline int sort_vert_cc(Vertex& vertex1, Vertex& vertex2)
 {
     // order is: in clique -> cands
 
@@ -2718,18 +2731,6 @@ __device__ __forceinline int sort_vert_cco(Vertex& vertex1, Vertex& vertex2)
     }
     else if (vertex1.label != 1 && vertex2.label == 1) {
         return 1;
-    }
-    // for ties: in cand high -> low
-    else if(vertex1.label == 0 && vertex2.label == 0) {
-        if (vertex1.vertexid > vertex2.vertexid) {
-            return -1;
-        }
-        else if (vertex1.vertexid < vertex2.vertexid) {
-            return 1;
-        }
-        else {
-            return 0;
-        }
     }
     else {
         return 0;
