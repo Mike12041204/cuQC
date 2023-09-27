@@ -23,7 +23,7 @@ using namespace std;
 
 // global memory size: 1.500.000.000 ints
 #define TASKS_SIZE 15000000
-#define EXPAND_THRESHOLD 440
+#define EXPAND_THRESHOLD 4400
 #define BUFFER_SIZE 100000000
 #define BUFFER_OFFSET_SIZE 1000000
 #define CLIQUES_SIZE 50000000
@@ -476,7 +476,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
     //print_GPU_Graph(dd, input_graph);
     //print_CPU_Data(host_data);
     //print_GPU_Data(dd);
-    print_Data_Sizes(dd);
+    //print_Data_Sizes(dd);
 
     // EXPAND LEVEL
     cout << ">:BEGINNING EXPANSION" << endl;
@@ -515,9 +515,9 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
         }
 
         // DEBUG
-        //print_GPU_Data(dd);
+        print_GPU_Data(dd);
         //print_GPU_Cliques(dd);
-        print_Data_Sizes_Every(dd, 1);
+        //print_Data_Sizes_Every(dd, 1);
         //print_debug(dd);
         //print_idebug(dd);
     }
@@ -2670,7 +2670,7 @@ __device__ void degree_pruning_nonLU(GPU_Data& dd, Warp_Data& wd, Local_Data& ld
     } while (number_of_removed_candidates > 0);
 }
 
-// UPDATED
+// TODO - convert to a better sorting alogrithm
 __device__ void device_sort(Vertex* target, int size, int lane_idx, int (*func)(Vertex&, Vertex&))
 {
     // ALGO - ODD/EVEN
