@@ -322,6 +322,7 @@ inline int get_mindeg(int clique_size);
 inline bool cand_isvalid(Vertex& vertex, int clique_size);
 inline void chkerr(cudaError_t code);
 
+// DEBUG
 void print_CPU_Data(CPU_Data& host_data);
 void print_GPU_Data(GPU_Data& dd);
 void print_CPU_Graph(CPU_Graph& host_graph);
@@ -369,11 +370,12 @@ __device__ __forceinline int device_get_mindeg(int number_of_members, GPU_Data& 
 
 
 // TODO - test program on larger graphs
-// TODO - increase thread usage by monitoring and improving memory usage
+// TODO - increase thread usage by monitoring and improving memory usage, consult gpu videos
 // TODO - reevaluate and change where uint64_t's are used
 // TODO - correct and improve parallelization of LU pruning
-// TODO - add vertices data structure to diagram and upload
 // TODO - data is by far the largest in wbuffers during the first few level, might be worth running on cpu for these levels
+// TODO implement cover pruning on cpu section and consider critical and cover pruning for gpu section
+// TODO - look at how Quick constructs graph and other things for optimization tricks
 
 
 

@@ -1,16 +1,48 @@
-    int idx = (blockIdx.x * blockDim.x + threadIdx.x);
+--- RESEARCH NOVELTIES ---
 
-    int warp_idx = (idx / WARP_SIZE);
-    int lane_idx = (idx % WARP_SIZE);
-    const int warps_per_block = (BLOCK_SIZE / WARP_SIZE);
-    int warp_in_block_idx = ((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE));
+0 - PRUNING RULES - Adapted from the Quick algorithm.
 
-    // warp buffer write starts
-    int wtasks_write = (WTASKS_SIZE * (idx / WARP_SIZE));
-    int wtasks_offset_write = (WTASKS_OFFSET_SIZE * (idx / WARP_SIZE));
-    int wcliques_write = (WCLIQUES_SIZE * (idx / WARP_SIZE));
-    int wcliques_offset_write = (WCLIQUES_OFFSET_SIZE * (idx / WARP_SIZE));
-    int wvertices_write = (WVERTICES_SIZE * (idx / WARP_SIZE));
-    int svertices_write = (VERTICES_SIZE * ((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE));
+1 - TASK-BASED DESIGN - bfs rather than dfs allows for independant tasks.
 
-    -1073741819.
+2 - MEMORY BOUNDING STRATEGY - To address the problem of the size of the tasks array-based data structure, the number of tasks expanded at each level will be limited, instead 
+    expanding certain ones until they are complete then moving onto others. Since each task can generate thousands of others there will be no lack of tasks to parallelize even 
+    with limited expansion.
+
+3 - ARRAY-BASED DATA-STRUCTURE - tasks1, tasks2, and the buffer all use multiple arrays to represent the vertex-task data. tasks1 and 2 are small in size as they transfer all 
+    data to each other each level. The buffer is large in size as it acts to fill these, remaining inactive otherwise.
+
+4 - BUFFER STACK - The buffer acts as a stack since it is used for push and pop operations. When a level generates to many tasks the excess are pushed onto the top of the the 
+    stack. When a level does not generate enough tasks the tasks arrays are filled from poping tasks from the top of the buffer.
+
+5 - AVOIDED DUPLICATE CALCULATIONS - unlike the (GPU Clique Mining?) algo we did not have to perform expansion twice, once to calculate write positions, next to get data. 
+    This is done by utilizing our global-memory warp-buffer data-structures
+
+6 - DYNAMIC WARP LEVEL MEMORY SELECTION - warp will store vertices in either shared or global memory depending on its size
+
+7 - PRUNING INTERSECTION SPEED IMPROVEMENT - using the second intersection technique of A.vert A.rvert binary search neighbors(rvert), we speed up the Quick algorithms
+    intersection technique by improving the the neighbors(rvert) aspect from a linear factor to a log factor
+
+8 - GPU ORIENTATED DESIGN - the work is devided at the warp level, with each warp handled its own, independant task, with 32 threads assigned to it. This allows for
+    effective parallel solving of the problem.
+
+9 - PRUNING INTERSECTION PARALLELISM IMPROVEMENT - We can dynamically select whether to paralleize the outer or inner for loop when performing an intersection.
+    This parallelizes the iteration of vertices and removed vertices respectively, we can choose which one to do based on which one is larger and allows for more thread usage. 
+    
+
+
+--- REMOVED VARIABLES ---
+
+int idx = (blockIdx.x * blockDim.x + threadIdx.x);
+
+int warp_idx = (idx / WARP_SIZE);
+int lane_idx = (idx % WARP_SIZE);
+const int warps_per_block = (BLOCK_SIZE / WARP_SIZE);
+int warp_in_block_idx = ((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE));
+
+// warp buffer write starts
+int wtasks_write = (WTASKS_SIZE * (idx / WARP_SIZE));
+int wtasks_offset_write = (WTASKS_OFFSET_SIZE * (idx / WARP_SIZE));
+int wcliques_write = (WCLIQUES_SIZE * (idx / WARP_SIZE));
+int wcliques_offset_write = (WCLIQUES_OFFSET_SIZE * (idx / WARP_SIZE));
+int wvertices_write = (WVERTICES_SIZE * (idx / WARP_SIZE));
+int svertices_write = (VERTICES_SIZE * ((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE));

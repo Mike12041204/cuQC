@@ -5,13 +5,28 @@
   </ItemGroup>
   <ItemGroup>
     <Text Include="notes.txt" />
-    <Text Include="GSE1730_q.txt" />
-    <Text Include="GSE10158_q.txt" />
-    <Text Include="Enron_q.txt" />
-    <Text Include="graph8.txt" />
-    <Text Include="lastfm.txt" />
+    <Text Include="GSE10158_q.txt">
+      <Filter>graph_files</Filter>
+    </Text>
+    <Text Include="Enron_q.txt">
+      <Filter>graph_files</Filter>
+    </Text>
+    <Text Include="graph8.txt">
+      <Filter>graph_files</Filter>
+    </Text>
+    <Text Include="GSE1730_q.txt">
+      <Filter>graph_files</Filter>
+    </Text>
+    <Text Include="lastfm.txt">
+      <Filter>graph_files</Filter>
+    </Text>
   </ItemGroup>
   <ItemGroup>
-    <Image Include="DS_Diagram (1).jpg" />
+    <Image Include="DS_Diagram.jpg" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="graph_files">
+      <UniqueIdentifier>{eaef58fd-e79e-4f61-bddb-736bb2ff83dd}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
 </Project>
