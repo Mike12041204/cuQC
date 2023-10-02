@@ -22,25 +22,25 @@ using namespace std;
 // Shared Memory: 48 KB
 
 // global memory size: 1.500.000.000 ints
-#define TASKS_SIZE 15000000
-#define EXPAND_THRESHOLD 44000
+#define TASKS_SIZE 2000000
+#define EXPAND_THRESHOLD 704
 #define BUFFER_SIZE 100000000
 #define BUFFER_OFFSET_SIZE 1000000
-#define CLIQUES_SIZE 50000000
-#define CLIQUES_OFFSET_SIZE 500000
+#define CLIQUES_SIZE 2000000
+#define CLIQUES_OFFSET_SIZE 20000
 #define CLIQUES_PERCENT 50
 
 // per warp
-#define WCLIQUES_SIZE 50000
+#define WCLIQUES_SIZE 5000
 #define WCLIQUES_OFFSET_SIZE 500
-#define WTASKS_SIZE 100000
-#define WTASKS_OFFSET_SIZE 500
+#define WTASKS_SIZE 400000
+#define WTASKS_OFFSET_SIZE 40000
 #define WVERTICES_SIZE 40000
 
 // shared memory size: 12.300 ints
-#define VERTICES_SIZE 110
+#define VERTICES_SIZE 100
  
-#define BLOCK_SIZE 640
+#define BLOCK_SIZE 512
 #define NUM_OF_BLOCKS 22
 #define WARP_SIZE 32
 
@@ -350,7 +350,7 @@ __device__ bool degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
 __device__ void update_degrees(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, int number_of_removed_candidates);
 __device__ void calculate_LU_bounds(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
 
-__device__ void degree_pruning_nonLU(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, bool& failed_found);
+__device__ bool degree_pruning_nonLU(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
 __device__ void device_sort(Vertex* target, int size, int lane_idx, int (*func)(Vertex&, Vertex&));
 __device__ __forceinline int sort_vert_cp(Vertex& vertex1, Vertex& vertex2);
 __device__ __forceinline int sort_vert_cc(Vertex& vertex1, Vertex& vertex2);
@@ -365,7 +365,12 @@ __device__ __forceinline int device_get_mindeg(int number_of_members, GPU_Data& 
 
 // TODO - test program on larger graphs
 // TODO - increase thread usage by monitoring and improving memory usage
+
+// NEW - memory access is probable already coalesced since L1 caches are shared at the warp level and the warp is already working on contingent data, there is no need to coalesce at the lane level
 // TODO - test if it would be beneficial to coalesce memory access in for loops throughout the program, check out cuts writing on this
+
+// TODO - reevaluate and change where uint64_t's are used
+// UNSURE - data is by far the largest in wbuffers during the first few level, might be worth running on cpu for these levels
 
 
 
@@ -476,7 +481,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
     //print_GPU_Graph(dd, input_graph);
     //print_CPU_Data(host_data);
     //print_GPU_Data(dd);
-    //print_Data_Sizes(dd);
+    print_Data_Sizes(dd);
 
     // EXPAND LEVEL
     cout << ">:BEGINNING EXPANSION" << endl;
@@ -494,7 +499,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
         // DEBUG
         //print_WClique_Buffers(dd);
         //print_WTask_Buffers(dd);
-        //print_Warp_Data_Sizes_Every(dd, 1);
+        print_Warp_Data_Sizes_Every(dd, 1);
         //print_All_Warp_Data_Sizes_Every(dd, 1);
 
         // consolidate all the warp tasks/cliques buffers into the next global tasks array, buffer, and cliques
@@ -517,7 +522,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
         // DEBUG
         //print_GPU_Data(dd);
         //print_GPU_Cliques(dd);
-        //print_Data_Sizes_Every(dd, 1);
+        print_Data_Sizes_Every(dd, 1);
         //print_debug(dd);
         //print_idebug(dd);
     }
@@ -972,6 +977,858 @@ void initialize_tasks(CPU_Graph& graph, CPU_Data& host_data)
         delete new_vertices;
     }
     delete old_vertices;
+}
+
+void cpu_expand(CPU_Graph& graph, CPU_Data host_data)
+{
+    // set to false later if candidate is generated indicating non-maximal expansion
+    maximal_expansion = true;
+
+    // initate the variables containing the location of the read and write task vectors, done in an alternating, odd-even manner like the c-intersection of cuTS
+    int* read_vertices, * read_labels, * read_indeg, * read_exdeg, * write_vertices, * write_labels, * write_indeg, * write_exdeg, * read_lvl2adj, * write_lvl2adj;
+    uint64_t* read_offsets, * read_count, * write_offsets, * write_count;
+    if (task_counter % 2 == 1) {
+        read_offsets = offset_tasks;
+        read_vertices = vertex_tasks;
+        read_labels = label_tasks;
+        read_indeg = indeg_tasks;
+        read_exdeg = exdeg_tasks;
+        read_lvl2adj = lvl2adj_tasks;
+        read_count = &tasks_count;
+        write_offsets = offset_tasks2;
+        write_vertices = vertex_tasks2;
+        write_labels = label_tasks2;
+        write_indeg = indeg_tasks2;
+        write_exdeg = exdeg_tasks2;
+        write_lvl2adj = lvl2adj_tasks2;
+        write_count = &tasks_count2;
+    }
+    else {
+        read_offsets = offset_tasks2;
+        read_vertices = vertex_tasks2;
+        read_labels = label_tasks2;
+        read_indeg = indeg_tasks2;
+        read_exdeg = exdeg_tasks2;
+        read_lvl2adj = lvl2adj_tasks2;
+        read_count = &tasks_count2;
+        write_offsets = offset_tasks;
+        write_vertices = vertex_tasks;
+        write_labels = label_tasks;
+        write_indeg = indeg_tasks;
+        write_exdeg = exdeg_tasks;
+        write_lvl2adj = lvl2adj_tasks;
+        write_count = &tasks_count;
+    }
+    *write_count = 0;
+    write_offsets[0] = 0;
+
+    // --- handle tasks at current level ---
+
+    for (int i = 0; i < *read_count; i++)
+    {
+        // get information of vertices being handled within tasks
+        uint64_t start = read_offsets[i];
+        uint64_t end = read_offsets[i + 1];
+        int total_vertices = end - start;
+        int number_of_vertices = 0;
+        for (uint64_t j = start; j < end; j++) {
+            if (read_labels[j] == 1) {
+                number_of_vertices++;
+            }
+        }
+        int number_of_candidates = total_vertices - number_of_vertices;
+        int expansions = number_of_candidates;
+
+        Vertex* old_vertices = new Vertex[total_vertices];
+        if (old_vertices == nullptr) {
+            cout << "ERROR: bad malloc" << endl;
+        }
+        for (int j = 0; j < total_vertices; j++) {
+            old_vertices[j].vertexid = read_vertices[start + j];
+            old_vertices[j].label = read_labels[start + j];
+            old_vertices[j].indeg = read_indeg[start + j];
+            old_vertices[j].exdeg = read_exdeg[start + j];
+            old_vertices[j].lvl2adj = read_lvl2adj[start + j];
+        }
+        qsort(old_vertices, total_vertices, sizeof(Vertex), sort_vertices);
+
+        // --- lookahead pruning ---
+
+        bool lookahead_sucess = true;
+        for (int j = 0; j < total_vertices; j++) {
+            if (old_vertices[j].lvl2adj != total_vertices - 1 || old_vertices[j].indeg + old_vertices[j].exdeg < minimum_degrees[total_vertices]) {
+                lookahead_sucess = false;
+                break;
+            }
+        }
+
+        if (lookahead_sucess) {
+            // write to cliques
+            uint64_t start_write = cliques_offset[cliques_offset_cursor];
+            for (int j = 0; j < total_vertices; j++) {
+                cliques[start_write + j] = old_vertices[j].vertexid;
+            }
+            cliques_offset_cursor++;
+            cliques_offset[cliques_offset_cursor] = start_write + total_vertices;
+
+            // continue on to next task
+            continue;
+        }
+
+        // --- generate next level tasks ---
+
+        for (int j = 0; j < expansions; j++) {
+
+            // --- remove candidate vertex --- 
+
+            // pruning helper variables
+            int pvertexid;
+            uint64_t pneighbors_start;
+            uint64_t pneighbors_end;
+
+            if (j != 0) {
+                number_of_candidates--;
+                total_vertices--;
+
+                // update exdeg of vertices connected to removed cand
+                pvertexid = old_vertices[total_vertices].vertexid;
+                pneighbors_start = graph.onehop_offsets[pvertexid];
+                pneighbors_end = graph.onehop_offsets[pvertexid + 1];
+                for (uint64_t k = pneighbors_start; k < pneighbors_end; k++) {
+                    int neighbor_of_removed_vertex = graph.onehop_neighbors[k];
+                    int position_of_neighbor = linear_search_vertices(old_vertices, total_vertices, neighbor_of_removed_vertex);
+                    if (position_of_neighbor != -1) {
+                        old_vertices[position_of_neighbor].exdeg--;
+                    }
+                }
+
+                // update lvl2adj
+                pneighbors_start = graph.twohop_offsets[pvertexid];
+                pneighbors_end = graph.twohop_offsets[pvertexid + 1];
+                for (uint64_t k = pneighbors_start; k < pneighbors_end; k++) {
+                    int neighbor_of_removed_vertex = graph.twohop_neighbors[k];
+                    int position_of_neighbor = linear_search_vertices(old_vertices, total_vertices, neighbor_of_removed_vertex);
+                    if (position_of_neighbor != -1) {
+                        old_vertices[position_of_neighbor].lvl2adj--;
+                    }
+                }
+
+                // break if not enough vertices as only less will be added in the next iteration
+                if (total_vertices < minimum_clique_size) {
+                    break;
+                }
+
+                // check for failed vertices
+                bool failed_found = false;
+                for (int k = 0; k < number_of_vertices; k++) {
+                    if (!vert_isextendable(old_vertices[k], number_of_vertices)) {
+                        failed_found = true;
+                        break;
+                    }
+                }
+                if (failed_found) {
+                    break;
+                }
+            }
+
+            // --- initialize new vertices ---
+
+            Vertex* new_vertices = new Vertex[total_vertices];
+            if (old_vertices == nullptr) {
+                cout << "ERROR: bad malloc" << endl;
+            }
+            int number_of_new_vertices = number_of_vertices;
+            int number_of_new_candidates = number_of_candidates;
+            int total_new_vertices = total_vertices;
+            for (int k = 0; k < total_new_vertices; k++) {
+                new_vertices[k].vertexid = old_vertices[k].vertexid;
+                new_vertices[k].label = old_vertices[k].label;
+                new_vertices[k].indeg = old_vertices[k].indeg;
+                new_vertices[k].exdeg = old_vertices[k].exdeg;
+                new_vertices[k].lvl2adj = old_vertices[k].lvl2adj;
+            }
+
+            // --- add one vertex ---
+
+            new_vertices[total_new_vertices - 1].label = 1;
+            number_of_new_vertices++;
+            number_of_new_candidates--;
+
+            pvertexid = new_vertices[total_new_vertices - 1].vertexid;
+            pneighbors_start = graph.onehop_offsets[pvertexid];
+            pneighbors_end = graph.onehop_offsets[pvertexid + 1];
+
+            // update the exdeg and indeg of all vertices adj to the vertice just added to the vertex set
+            for (uint64_t k = pneighbors_start; k < pneighbors_end; k++) {
+                int neighbor_of_added_vertex = graph.onehop_neighbors[k];
+                int position_of_neighbor = linear_search_vertices(new_vertices, total_new_vertices, neighbor_of_added_vertex);
+                if (position_of_neighbor != -1) {
+                    new_vertices[position_of_neighbor].exdeg--;
+                    new_vertices[position_of_neighbor].indeg++;
+                }
+            }
+            // sort new vertices putting just added vertex at end of all vertices in x
+            qsort(new_vertices, total_new_vertices, sizeof(Vertex), sort_vertices);
+
+            // --- diameter pruning ---
+
+            int number_of_removed_candidates = 0;
+            pneighbors_start = graph.twohop_offsets[pvertexid];
+            pneighbors_end = graph.twohop_offsets[pvertexid + 1];
+            int added_twohop_neighbors_count = pneighbors_end - pneighbors_start;
+            for (int k = number_of_new_vertices; k < total_new_vertices; k++) {
+                int candidate_vertexid = new_vertices[k].vertexid;
+                int position_of_candidate = linear_search_array(graph.twohop_neighbors + pneighbors_start, added_twohop_neighbors_count, candidate_vertexid);
+                if (position_of_candidate == -1) {
+                    new_vertices[k].label = -1;
+                    number_of_removed_candidates++;
+                }
+            }
+            qsort(new_vertices + number_of_new_vertices, number_of_new_candidates, sizeof(Vertex), sort_vertices);
+
+            // update exdeg of vertices connected to removed cands
+            for (int k = total_new_vertices - number_of_removed_candidates; k < total_new_vertices; k++) {
+                pvertexid = new_vertices[k].vertexid;
+                pneighbors_start = graph.onehop_offsets[pvertexid];
+                pneighbors_end = graph.onehop_offsets[pvertexid + 1];
+                for (uint64_t l = pneighbors_start; l < pneighbors_end; l++) {
+                    int neighbor_of_removed_vertex = graph.onehop_neighbors[l];
+                    int position_of_neighbor = linear_search_vertices(new_vertices, total_new_vertices, neighbor_of_removed_vertex);
+                    if (position_of_neighbor != -1) {
+                        new_vertices[position_of_neighbor].exdeg--;
+                    }
+                }
+
+                // update lvl2adj
+                pneighbors_start = graph.twohop_offsets[pvertexid];
+                pneighbors_end = graph.twohop_offsets[pvertexid + 1];
+                for (uint64_t l = pneighbors_start; l < pneighbors_end; l++) {
+                    int neighbor_of_removed_vertex = graph.twohop_neighbors[l];
+                    int position_of_neighbor = linear_search_vertices(new_vertices, total_new_vertices, neighbor_of_removed_vertex);
+                    if (position_of_neighbor != -1) {
+                        new_vertices[position_of_neighbor].lvl2adj--;
+                    }
+                }
+            }
+            total_new_vertices -= number_of_removed_candidates;
+            number_of_new_candidates -= number_of_removed_candidates;
+
+            // continue if not enough vertices after pruning
+            if (total_new_vertices < minimum_clique_size) {
+                continue;
+            }
+
+            // --- degree-based pruning ---
+
+            // LU result variable declarations
+            bool failed_found = false;
+            bool invalid_bounds = false;
+
+            do
+            {
+                // --- calculate LU ---
+
+                qsort(new_vertices, total_new_vertices, sizeof(Vertex), sort_vertices_LU);
+                // LU calculation variable declarations
+                int tightened_Upper_bound, index, min_clq_indeg, min_indeg_exdeg, min_clq_totaldeg, sum_clq_indeg, sum_candidate_indeg;
+
+                sum_candidate_indeg = 0;
+                tightened_Upper_bound = 0;
+
+                min_clq_indeg = new_vertices[0].indeg;
+                min_indeg_exdeg = new_vertices[0].exdeg;
+                min_clq_totaldeg = new_vertices[0].indeg + new_vertices[0].exdeg;
+                sum_clq_indeg = new_vertices[0].indeg;
+
+                for (index = 1; index < number_of_new_vertices; index++) {
+                    sum_clq_indeg += new_vertices[index].indeg;
+
+                    if (new_vertices[index].indeg < min_clq_indeg) {
+                        min_clq_indeg = new_vertices[index].indeg;
+                        min_indeg_exdeg = new_vertices[index].exdeg;
+                    }
+                    else if (new_vertices[index].indeg == min_clq_indeg) {
+                        if (new_vertices[index].exdeg < min_indeg_exdeg) {
+                            min_indeg_exdeg = new_vertices[index].exdeg;
+                        }
+                    }
+
+                    if (new_vertices[index].indeg + new_vertices[index].exdeg < min_clq_totaldeg) {
+                        min_clq_totaldeg = new_vertices[index].indeg + new_vertices[index].exdeg;
+                    }
+                }
+
+                minimum_external_degree = get_mindeg(number_of_new_vertices + 1);
+
+                if (min_clq_indeg < minimum_degrees[number_of_new_vertices])
+                {
+                    // lower
+                    Lower_bound = get_mindeg(number_of_new_vertices) - min_clq_indeg;
+
+                    while (Lower_bound <= min_indeg_exdeg && min_clq_indeg + Lower_bound < minimum_degrees[number_of_new_vertices + Lower_bound]) {
+                        Lower_bound++;
+                    }
+
+                    if (min_clq_indeg + Lower_bound < minimum_degrees[number_of_new_vertices + Lower_bound]) {
+                        Lower_bound = number_of_new_candidates + 1;
+                        invalid_bounds = true;
+                    }
+
+                    // upper
+                    Upper_bound = floor(min_clq_totaldeg / minimum_degree_ratio) + 1 - number_of_new_vertices;
+
+                    if (Upper_bound > number_of_new_candidates) {
+                        Upper_bound = number_of_new_candidates;
+                    }
+
+                    // tighten
+                    if (Lower_bound < Upper_bound) {
+                        // tighten lower
+                        for (index = 0; index < Lower_bound; index++) {
+                            sum_candidate_indeg += new_vertices[number_of_new_vertices + index].indeg;
+                        }
+
+                        while (index < Upper_bound && sum_clq_indeg + sum_candidate_indeg < number_of_new_vertices * minimum_degrees[number_of_new_vertices + index]) {
+                            sum_candidate_indeg += new_vertices[number_of_new_vertices + index].indeg;
+                            index++;
+                        }
+
+                        if (sum_clq_indeg + sum_candidate_indeg < number_of_new_vertices * minimum_degrees[number_of_new_vertices + index]) {
+                            Lower_bound = Upper_bound + 1;
+                            invalid_bounds = true;
+                        }
+                        else {
+                            Lower_bound = index;
+
+                            tightened_Upper_bound = index;
+
+                            while (index < Upper_bound) {
+                                sum_candidate_indeg += new_vertices[number_of_new_vertices + index].indeg;
+
+                                index++;
+
+                                if (sum_clq_indeg + sum_candidate_indeg >= number_of_new_vertices * minimum_degrees[number_of_new_vertices + index]) {
+                                    tightened_Upper_bound = index;
+                                }
+                            }
+
+                            if (Upper_bound > tightened_Upper_bound) {
+                                Upper_bound = tightened_Upper_bound;
+                            }
+
+                            if (Lower_bound > 1) {
+                                minimum_external_degree = get_mindeg(number_of_new_vertices + Lower_bound);
+                            }
+                        }
+                    }
+                }
+                else {
+                    minimum_external_degree = get_mindeg(number_of_new_vertices + 1);
+
+                    Upper_bound = number_of_new_candidates;
+
+                    if (number_of_new_vertices < minimum_clique_size) {
+                        Lower_bound = minimum_clique_size - number_of_new_vertices;
+                    }
+                    else {
+                        Lower_bound = 0;
+                    }
+                }
+
+                if (number_of_new_vertices + Upper_bound < minimum_clique_size) {
+                    invalid_bounds = true;
+                }
+
+                if (Upper_bound < 0 || Upper_bound < Lower_bound) {
+                    invalid_bounds = true;
+                }
+
+                if (invalid_bounds) {
+                    break;
+                }
+
+                // --- end LU ---
+
+                // check for failed vertices
+                for (int k = 0; k < number_of_new_vertices; k++) {
+                    if (!vert_isextendable_LU(new_vertices[k], number_of_new_vertices)) {
+                        failed_found = true;
+                        break;
+                    }
+                }
+                if (failed_found) {
+                    break;
+                }
+
+                // remove cands that do not meet the deg requirement
+                number_of_removed_candidates = 0;
+                for (int k = number_of_new_vertices; k < total_new_vertices; k++) {
+                    if (!cand_isvalid_LU(new_vertices[k], number_of_new_vertices)) {
+                        new_vertices[k].label = -1;
+                        number_of_removed_candidates++;
+                    }
+                }
+                qsort(new_vertices, total_new_vertices, sizeof(Vertex), sort_vertices);
+
+                // update exdeg of vertices connected to removed cands
+                for (int k = total_new_vertices - number_of_removed_candidates; k < total_new_vertices; k++) {
+                    pvertexid = new_vertices[k].vertexid;
+                    pneighbors_start = graph.onehop_offsets[pvertexid];
+                    pneighbors_end = graph.onehop_offsets[pvertexid + 1];
+                    for (uint64_t l = pneighbors_start; l < pneighbors_end; l++) {
+                        int neighbor_of_removed_vertex = graph.onehop_neighbors[l];
+                        int position_of_neighbor = linear_search_vertices(new_vertices, total_new_vertices, neighbor_of_removed_vertex);
+                        if (position_of_neighbor != -1) {
+                            new_vertices[position_of_neighbor].exdeg--;
+                        }
+                    }
+
+                    // update lvl2adj
+                    pneighbors_start = graph.twohop_offsets[pvertexid];
+                    pneighbors_end = graph.twohop_offsets[pvertexid + 1];
+                    for (uint64_t l = pneighbors_start; l < pneighbors_end; l++) {
+                        int neighbor_of_removed_vertex = graph.twohop_neighbors[l];
+                        int position_of_neighbor = linear_search_vertices(new_vertices, total_new_vertices, neighbor_of_removed_vertex);
+                        if (position_of_neighbor != -1) {
+                            new_vertices[position_of_neighbor].lvl2adj--;
+                        }
+                    }
+                }
+                total_new_vertices -= number_of_removed_candidates;
+                number_of_new_candidates -= number_of_removed_candidates;
+            } while (number_of_removed_candidates > 0);
+
+            // continue if not enough vertices after pruning
+            if (total_new_vertices < minimum_clique_size) {
+                continue;
+            }
+
+            // if vertex in x found as not extendable, check if current set is clique and continue to next iteration
+            if (failed_found || invalid_bounds) {
+                if (number_of_new_vertices >= minimum_clique_size) {
+                    bool clique = true;
+                    int degree_requirement = minimum_degrees[number_of_new_vertices];
+                    for (int k = 0; k < number_of_new_vertices; k++) {
+                        if (new_vertices[k].indeg < degree_requirement) {
+                            clique = false;
+                            break;
+                        }
+                    }
+
+                    // if clique write to cliques array
+                    if (clique) {
+                        uint64_t start_write = cliques_offset[cliques_offset_cursor];
+                        for (int k = 0; k < number_of_new_vertices; k++) {
+                            cliques[start_write + k] = new_vertices[k].vertexid;
+                        }
+                        cliques_offset_cursor++;
+                        cliques_offset[cliques_offset_cursor] = start_write + number_of_new_vertices;
+                    }
+                }
+                continue;
+            }
+
+            // --- critical vertex pruning ---
+
+            set<int> critical_vertex_neighbors;
+
+            // adj_counter[0] = 10, means that the vertex at position 0 in new_vertices has 10 critical vertices neighbors within 2 hops
+            int* adj_counters = new int[total_new_vertices];
+            memset(adj_counters, 0, sizeof(int) * total_new_vertices);
+
+            // iterate through all vertices in clique
+            for (int k = 0; k < number_of_new_vertices; k++)
+            {
+                // if they are a critical vertex
+                if (new_vertices[k].indeg + new_vertices[k].exdeg == minimum_degrees[number_of_new_vertices + Lower_bound] && new_vertices[k].exdeg > 0) {
+
+                    // iterate through all neighbors
+                    pvertexid = new_vertices[k].vertexid;
+                    pneighbors_start = graph.onehop_offsets[pvertexid];
+                    pneighbors_end = graph.onehop_offsets[pvertexid + 1];
+                    for (uint64_t l = pneighbors_start; l < pneighbors_end; l++) {
+                        int neighbor_id = graph.onehop_neighbors[l];
+                        int position_of_neighbor = linear_search_vertices(new_vertices, total_new_vertices, neighbor_id);
+
+                        // if neighbor is cand
+                        if (position_of_neighbor != -1) {
+                            if (new_vertices[position_of_neighbor].label == 0) {
+                                critical_vertex_neighbors.insert(neighbor_id);
+                                new_vertices[position_of_neighbor].label = 4;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // if there were any neighbors of critical vertices
+            if (critical_vertex_neighbors.size() > 0)
+            {
+                // sort vertices so that critical vertex adjacent candidates are immediately after vertices within the clique
+                qsort(new_vertices, total_new_vertices, sizeof(Vertex), sort_vertices);
+
+                // iterate through all neighbors
+                for (int neighbor : critical_vertex_neighbors) {
+                    // update 1hop adj
+                    pneighbors_start = graph.onehop_offsets[neighbor];
+                    pneighbors_end = graph.onehop_offsets[neighbor + 1];
+                    for (uint64_t k = pneighbors_start; k < pneighbors_end; k++) {
+                        int neighbor_of_added_vertex = graph.onehop_neighbors[k];
+                        int position_of_neighbor = linear_search_vertices(new_vertices, total_new_vertices, neighbor_of_added_vertex);
+                        if (position_of_neighbor != -1) {
+                            new_vertices[position_of_neighbor].indeg++;
+                            new_vertices[position_of_neighbor].exdeg--;
+                        }
+                    }
+
+                    // track 2hop adj
+                    pneighbors_start = graph.twohop_offsets[neighbor];
+                    pneighbors_end = graph.twohop_offsets[neighbor + 1];
+                    for (uint64_t k = pneighbors_start; k < pneighbors_end; k++) {
+                        int neighbor_of_added_vertex = graph.twohop_neighbors[k];
+                        int position_of_neighbor = linear_search_vertices(new_vertices, total_new_vertices, neighbor_of_added_vertex);
+                        if (position_of_neighbor != -1) {
+                            adj_counters[position_of_neighbor]++;
+                        }
+                    }
+                }
+
+                bool critical_fail = false;
+
+                // all vertices within the clique must be within 2hops of the newly added critical vertex adj vertices
+                for (int k = 0; k < number_of_new_vertices; k++) {
+                    if (adj_counters[k] != critical_vertex_neighbors.size()) {
+                        critical_fail = true;
+                    }
+                }
+
+                // all critical adj vertices must all be within 2 hops of each other
+                for (int k = number_of_new_vertices; k < number_of_new_vertices + critical_vertex_neighbors.size(); k++) {
+                    if (adj_counters[k] < critical_vertex_neighbors.size() - 1) {
+                        critical_fail = true;
+                    }
+                }
+
+                if (critical_fail) {
+                    continue;
+                }
+
+                // no failed vertices found so add all critical vertex adj candidates to clique
+                for (int k = number_of_new_vertices; k < number_of_new_vertices + critical_vertex_neighbors.size(); k++) {
+                    new_vertices[k].label = 1;
+                }
+                number_of_new_vertices += critical_vertex_neighbors.size();
+                number_of_new_candidates -= critical_vertex_neighbors.size();
+                qsort(new_vertices, total_new_vertices, sizeof(Vertex), sort_vertices);
+            }
+
+            // --- diameter pruning ---
+
+            number_of_removed_candidates = 0;
+            // remove all cands who are not within 2hops of all newly added cands
+            for (int k = number_of_new_vertices; k < total_new_vertices; k++) {
+                if (adj_counters[k] != critical_vertex_neighbors.size()) {
+                    new_vertices[k].label = -1;
+                    number_of_removed_candidates++;
+                }
+            }
+            qsort(new_vertices, total_new_vertices, sizeof(Vertex), sort_vertices);
+
+            delete adj_counters;
+
+            // update exdeg of vertices connected to removed cands
+            for (int k = total_new_vertices - number_of_removed_candidates; k < total_new_vertices; k++) {
+                pvertexid = new_vertices[k].vertexid;
+                pneighbors_start = graph.onehop_offsets[pvertexid];
+                pneighbors_end = graph.onehop_offsets[pvertexid + 1];
+                for (uint64_t l = pneighbors_start; l < pneighbors_end; l++) {
+                    int neighbor_of_removed_vertex = graph.onehop_neighbors[l];
+                    int position_of_neighbor = linear_search_vertices(new_vertices, total_new_vertices, neighbor_of_removed_vertex);
+                    if (position_of_neighbor != -1) {
+                        new_vertices[position_of_neighbor].exdeg--;
+                    }
+                }
+
+                // update lvl2adj
+                pneighbors_start = graph.twohop_offsets[pvertexid];
+                pneighbors_end = graph.twohop_offsets[pvertexid + 1];
+                for (uint64_t l = pneighbors_start; l < pneighbors_end; l++) {
+                    int neighbor_of_removed_vertex = graph.twohop_neighbors[l];
+                    int position_of_neighbor = linear_search_vertices(new_vertices, total_new_vertices, neighbor_of_removed_vertex);
+                    if (position_of_neighbor != -1) {
+                        new_vertices[position_of_neighbor].lvl2adj--;
+                    }
+                }
+            }
+            total_new_vertices -= number_of_removed_candidates;
+
+            // --- degree-based pruning ---
+
+            do
+            {
+                // --- calculate LU ---
+
+                qsort(new_vertices, total_new_vertices, sizeof(Vertex), sort_vertices_LU);
+                // LU calculation variable declarations
+                int tightened_Upper_bound, index, min_clq_indeg, min_indeg_exdeg, min_clq_totaldeg, sum_clq_indeg, sum_candidate_indeg;
+
+                sum_candidate_indeg = 0;
+                tightened_Upper_bound = 0;
+
+                min_clq_indeg = new_vertices[0].indeg;
+                min_indeg_exdeg = new_vertices[0].exdeg;
+                min_clq_totaldeg = new_vertices[0].indeg + new_vertices[0].exdeg;
+                sum_clq_indeg = new_vertices[0].indeg;
+
+                for (index = 1; index < number_of_new_vertices; index++) {
+                    sum_clq_indeg += new_vertices[index].indeg;
+
+                    if (new_vertices[index].indeg < min_clq_indeg) {
+                        min_clq_indeg = new_vertices[index].indeg;
+                        min_indeg_exdeg = new_vertices[index].exdeg;
+                    }
+                    else if (new_vertices[index].indeg == min_clq_indeg) {
+                        if (new_vertices[index].exdeg < min_indeg_exdeg) {
+                            min_indeg_exdeg = new_vertices[index].exdeg;
+                        }
+                    }
+
+                    if (new_vertices[index].indeg + new_vertices[index].exdeg < min_clq_totaldeg) {
+                        min_clq_totaldeg = new_vertices[index].indeg + new_vertices[index].exdeg;
+                    }
+                }
+
+                minimum_external_degree = get_mindeg(number_of_new_vertices + 1);
+
+                if (min_clq_indeg < minimum_degrees[number_of_new_vertices])
+                {
+                    // lower
+                    Lower_bound = get_mindeg(number_of_new_vertices) - min_clq_indeg;
+
+                    while (Lower_bound <= min_indeg_exdeg && min_clq_indeg + Lower_bound < minimum_degrees[number_of_new_vertices + Lower_bound]) {
+                        Lower_bound++;
+                    }
+
+                    if (min_clq_indeg + Lower_bound < minimum_degrees[number_of_new_vertices + Lower_bound]) {
+                        Lower_bound = number_of_new_candidates + 1;
+                        invalid_bounds = true;
+                    }
+
+                    // upper
+                    Upper_bound = floor(min_clq_totaldeg / minimum_degree_ratio) + 1 - number_of_new_vertices;
+
+                    if (Upper_bound > number_of_new_candidates) {
+                        Upper_bound = number_of_new_candidates;
+                    }
+
+                    // tighten
+                    if (Lower_bound < Upper_bound) {
+                        // tighten lower
+                        for (index = 0; index < Lower_bound; index++) {
+                            sum_candidate_indeg += new_vertices[number_of_new_vertices + index].indeg;
+                        }
+
+                        while (index < Upper_bound && sum_clq_indeg + sum_candidate_indeg < number_of_new_vertices * minimum_degrees[number_of_new_vertices + index]) {
+                            sum_candidate_indeg += new_vertices[number_of_new_vertices + index].indeg;
+                            index++;
+                        }
+
+                        if (sum_clq_indeg + sum_candidate_indeg < number_of_new_vertices * minimum_degrees[number_of_new_vertices + index]) {
+                            Lower_bound = Upper_bound + 1;
+                            invalid_bounds = true;
+                        }
+                        else {
+                            Lower_bound = index;
+
+                            tightened_Upper_bound = index;
+
+                            while (index < Upper_bound) {
+                                sum_candidate_indeg += new_vertices[number_of_new_vertices + index].indeg;
+
+                                index++;
+
+                                if (sum_clq_indeg + sum_candidate_indeg >= number_of_new_vertices * minimum_degrees[number_of_new_vertices + index]) {
+                                    tightened_Upper_bound = index;
+                                }
+                            }
+
+                            if (Upper_bound > tightened_Upper_bound) {
+                                Upper_bound = tightened_Upper_bound;
+                            }
+
+                            if (Lower_bound > 1) {
+                                minimum_external_degree = get_mindeg(number_of_new_vertices + Lower_bound);
+                            }
+                        }
+                    }
+                }
+                else {
+                    minimum_external_degree = get_mindeg(number_of_new_vertices + 1);
+
+                    Upper_bound = number_of_new_candidates;
+
+                    if (number_of_new_vertices < minimum_clique_size) {
+                        Lower_bound = minimum_clique_size - number_of_new_vertices;
+                    }
+                    else {
+                        Lower_bound = 0;
+                    }
+                }
+
+                if (number_of_new_vertices + Upper_bound < minimum_clique_size) {
+                    invalid_bounds = true;
+                }
+
+                if (Upper_bound < 0 || Upper_bound < Lower_bound) {
+                    invalid_bounds = true;
+                }
+
+                if (invalid_bounds) {
+                    break;
+                }
+
+                // --- end LU ---
+
+                // check for failed vertices
+                for (int k = 0; k < number_of_new_vertices; k++) {
+                    if (!vert_isextendable_LU(new_vertices[k], number_of_new_vertices)) {
+                        failed_found = true;
+                        break;
+                    }
+                }
+                if (failed_found) {
+                    break;
+                }
+
+                // remove cands that do not meet the deg requirement
+                number_of_removed_candidates = 0;
+                for (int k = number_of_new_vertices; k < total_new_vertices; k++) {
+                    if (!cand_isvalid_LU(new_vertices[k], number_of_new_vertices)) {
+                        new_vertices[k].label = -1;
+                        number_of_removed_candidates++;
+                    }
+                }
+                qsort(new_vertices, total_new_vertices, sizeof(Vertex), sort_vertices);
+
+                // update exdeg of vertices connected to removed cands
+                for (int k = total_new_vertices - number_of_removed_candidates; k < total_new_vertices; k++) {
+                    pvertexid = new_vertices[k].vertexid;
+                    pneighbors_start = graph.onehop_offsets[pvertexid];
+                    pneighbors_end = graph.onehop_offsets[pvertexid + 1];
+                    for (uint64_t l = pneighbors_start; l < pneighbors_end; l++) {
+                        int neighbor_of_removed_vertex = graph.onehop_neighbors[l];
+                        int position_of_neighbor = linear_search_vertices(new_vertices, total_new_vertices, neighbor_of_removed_vertex);
+                        if (position_of_neighbor != -1) {
+                            new_vertices[position_of_neighbor].exdeg--;
+                        }
+                    }
+
+                    // update lvl2adj
+                    pneighbors_start = graph.twohop_offsets[pvertexid];
+                    pneighbors_end = graph.twohop_offsets[pvertexid + 1];
+                    for (uint64_t l = pneighbors_start; l < pneighbors_end; l++) {
+                        int neighbor_of_removed_vertex = graph.twohop_neighbors[l];
+                        int position_of_neighbor = linear_search_vertices(new_vertices, total_new_vertices, neighbor_of_removed_vertex);
+                        if (position_of_neighbor != -1) {
+                            new_vertices[position_of_neighbor].lvl2adj--;
+                        }
+                    }
+                }
+                total_new_vertices -= number_of_removed_candidates;
+                number_of_new_candidates -= number_of_removed_candidates;
+            } while (number_of_removed_candidates > 0);
+
+            // continue if not enough vertices after pruning
+            if (total_new_vertices < minimum_clique_size) {
+                continue;
+            }
+
+            // if vertex in x found as not extendable, check if current set is clique and continue to next iteration
+            if (failed_found || invalid_bounds) {
+                if (number_of_new_vertices >= minimum_clique_size) {
+                    bool clique = true;
+                    int degree_requirement = minimum_degrees[number_of_new_vertices];
+                    for (int k = 0; k < number_of_new_vertices; k++) {
+                        if (new_vertices[k].indeg < degree_requirement) {
+                            clique = false;
+                            break;
+                        }
+                    }
+
+                    // if clique write to cliques array
+                    if (clique) {
+                        uint64_t start_write = cliques_offset[cliques_offset_cursor];
+                        for (int k = 0; k < number_of_new_vertices; k++) {
+                            cliques[start_write + k] = new_vertices[k].vertexid;
+                        }
+                        cliques_offset_cursor++;
+                        cliques_offset[cliques_offset_cursor] = start_write + number_of_new_vertices;
+                    }
+                }
+                continue;
+            }
+
+            // --- TODO - cover vertex pruning ---
+
+            // --- check for GQC ---
+
+            if (number_of_new_vertices >= minimum_clique_size) {
+                bool clique = true;
+                int degree_requirement = minimum_degrees[number_of_new_vertices];
+                for (int k = 0; k < number_of_new_vertices; k++) {
+                    if (new_vertices[k].indeg < degree_requirement) {
+                        clique = false;
+                        break;
+                    }
+                }
+
+                // if clique write to cliques array
+                if (clique) {
+                    uint64_t start_write = cliques_offset[cliques_offset_cursor];
+                    for (int k = 0; k < number_of_new_vertices; k++) {
+                        cliques[start_write + k] = new_vertices[k].vertexid;
+                    }
+                    cliques_offset_cursor++;
+                    cliques_offset[cliques_offset_cursor] = start_write + number_of_new_vertices;
+                }
+            }
+
+            // --- write to tasks ---
+
+            if (number_of_new_candidates > 0) {
+                maximal_expansion = false;
+
+                if (*write_count < EXPAND_THRESHOLD) {
+                    uint64_t start_write = write_offsets[*write_count];
+
+                    for (int k = 0; k < total_new_vertices; k++) {
+                        write_vertices[start_write + k] = new_vertices[k].vertexid;
+                        write_labels[start_write + k] = new_vertices[k].label;
+                        write_indeg[start_write + k] = new_vertices[k].indeg;
+                        write_exdeg[start_write + k] = new_vertices[k].exdeg;
+                        write_lvl2adj[start_write + k] = new_vertices[k].lvl2adj;
+                    }
+                    (*write_count)++;
+                    write_offsets[*write_count] = start_write + total_new_vertices;
+                }
+                else {
+                    uint64_t start_write = offset_buffer[buffer_count];
+
+                    for (int k = 0; k < total_new_vertices; k++) {
+                        vertex_buffer[start_write + k] = new_vertices[k].vertexid;
+                        label_buffer[start_write + k] = new_vertices[k].label;
+                        indeg_buffer[start_write + k] = new_vertices[k].indeg;
+                        exdeg_buffer[start_write + k] = new_vertices[k].exdeg;
+                        lvl2adj_buffer[start_write + k] = new_vertices[k].lvl2adj;
+                    }
+                    buffer_count++;
+                    offset_buffer[buffer_count] = start_write + total_new_vertices;
+                }
+            }
+            delete new_vertices;
+        }
+        delete old_vertices;
+    }
 }
 
 void move_to_gpu(CPU_Data& host_data, GPU_Data& dd)
@@ -2234,8 +3091,6 @@ __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 {
     int pvertexid;
     bool failed_found;
-    Vertex member;
-    Vertex candidate;
 
     if ((ld.idx % WARP_SIZE) == 0) {
         ld.vertices[wd.total_vertices[ld.warp_in_block_idx] - 1].label = 1;
@@ -2281,7 +3136,7 @@ __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
 
     // DEGREE BASED PRUNING
-    failed_found = degree_pruning(dd, wd, ld);
+    failed_found = degree_pruning_nonLU(dd, wd, ld);
 
     // continue if not enough vertices after pruning
     if (wd.total_vertices[ld.warp_in_block_idx] < (*(dd.minimum_clique_size))) {
@@ -2639,9 +3494,10 @@ __device__ void calculate_LU_bounds(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 // --- HELPER KERNELS ---
 
 // DEBUG
-__device__ void degree_pruning_nonLU(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, bool& failed_found)
+__device__ bool degree_pruning_nonLU(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 {
     int number_of_removed_candidates;
+    bool failed_found;
 
     do
     {
@@ -2681,6 +3537,8 @@ __device__ void degree_pruning_nonLU(GPU_Data& dd, Warp_Data& wd, Local_Data& ld
         }
         __syncwarp();
     } while (number_of_removed_candidates > 0);
+
+    return failed_found;
 }
 
 // TODO - convert to a better sorting alogrithm

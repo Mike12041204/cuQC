@@ -9,5 +9,6 @@
     <Text Include="GSE10158_q.txt" />
     <Text Include="Enron_q.txt" />
     <Text Include="graph8.txt" />
+    <Text Include="lastfm.txt" />
   </ItemGroup>
 </Project>
