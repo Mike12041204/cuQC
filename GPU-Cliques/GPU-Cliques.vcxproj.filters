@@ -11,4 +11,7 @@
     <Text Include="graph8.txt" />
     <Text Include="lastfm.txt" />
   </ItemGroup>
+  <ItemGroup>
+    <Image Include="DS_Diagram (1).jpg" />
+  </ItemGroup>
 </Project>
