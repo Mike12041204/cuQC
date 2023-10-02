@@ -306,6 +306,7 @@ void calculate_minimum_degrees(CPU_Graph& graph);
 void search(CPU_Graph& input_graph, ofstream& temp_results);
 void allocate_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_cliques, CPU_Graph& input_graph);
 void initialize_tasks(CPU_Graph& graph, CPU_Data& host_data);
+void cpu_expand(CPU_Graph& graph, CPU_Data host_data);
 void move_to_gpu(CPU_Data& host_data, GPU_Data& dd);
 void dump_cliques(CPU_Cliques& host_cliques, GPU_Data& dd, ofstream& output_file);
 void free_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_cliques);
@@ -367,7 +368,7 @@ __device__ __forceinline int device_get_mindeg(int number_of_members, GPU_Data& 
 // TODO - increase thread usage by monitoring and improving memory usage
 
 // NEW - memory access is probable already coalesced since L1 caches are shared at the warp level and the warp is already working on contingent data, there is no need to coalesce at the lane level
-// TODO - test if it would be beneficial to coalesce memory access in for loops throughout the program, check out cuts writing on this
+// NEW - test if it would be beneficial to coalesce memory access in for loops throughout the program, check out cuts writing on this
 
 // TODO - reevaluate and change where uint64_t's are used
 // UNSURE - data is by far the largest in wbuffers during the first few level, might be worth running on cpu for these levels
@@ -979,6 +980,7 @@ void initialize_tasks(CPU_Graph& graph, CPU_Data& host_data)
     delete old_vertices;
 }
 
+// CURSOR - make this work
 void cpu_expand(CPU_Graph& graph, CPU_Data host_data)
 {
     // set to false later if candidate is generated indicating non-maximal expansion
@@ -988,7 +990,7 @@ void cpu_expand(CPU_Graph& graph, CPU_Data host_data)
     int* read_vertices, * read_labels, * read_indeg, * read_exdeg, * write_vertices, * write_labels, * write_indeg, * write_exdeg, * read_lvl2adj, * write_lvl2adj;
     uint64_t* read_offsets, * read_count, * write_offsets, * write_count;
     if (task_counter % 2 == 1) {
-        read_offsets = offset_tasks;
+        read_offsets = offset_tasks;-
         read_vertices = vertex_tasks;
         read_labels = label_tasks;
         read_indeg = indeg_tasks;
@@ -1767,8 +1769,6 @@ void cpu_expand(CPU_Graph& graph, CPU_Data host_data)
                 }
                 continue;
             }
-
-            // --- TODO - cover vertex pruning ---
 
             // --- check for GQC ---
 
@@ -3541,7 +3541,6 @@ __device__ bool degree_pruning_nonLU(GPU_Data& dd, Warp_Data& wd, Local_Data& ld
     return failed_found;
 }
 
-// TODO - convert to a better sorting alogrithm
 __device__ void device_sort(Vertex* target, int size, int lane_idx, int (*func)(Vertex&, Vertex&))
 {
     // ALGO - ODD/EVEN
