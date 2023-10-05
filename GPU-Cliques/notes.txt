@@ -1,6 +1,6 @@
 --- RESEARCH NOVELTIES ---
 
-0 - PRUNING RULES - Adapted from the Quick algorithm.
+0 - PRUNING RULES - Adapted from the Quick algorithm. LU pruning only done to loose bounds (? not sure yet)
 
 1 - TASK-BASED DESIGN - bfs rather than dfs allows for independant tasks.
 
@@ -27,6 +27,8 @@
 
 9 - PRUNING INTERSECTION PARALLELISM IMPROVEMENT - We can dynamically select whether to paralleize the outer or inner for loop when performing an intersection.
     This parallelizes the iteration of vertices and removed vertices respectively, we can choose which one to do based on which one is larger and allows for more thread usage. 
+
+10 - HYBRID CPU / GPU EXPANSION - saves memory (write more for this)
     
 
 
