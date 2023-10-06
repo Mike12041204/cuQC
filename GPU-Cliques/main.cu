@@ -398,6 +398,7 @@ __device__ __forceinline int device_get_mindeg(int number_of_members, GPU_Data& 
 // TODO - make consistent method names for cpu and gpu h vs d
 // UNSURE - still not really sure how local memory works for gpu threads and why program cant utilize all threads
 // TODO - optimize for loops to have simpler conditional and maybe no index if possible
+// TODO - make methods for ul bounds, and loose ul bounds to compare them directly
 
 
 
@@ -506,6 +507,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
     print_CPU_Data(host_data);
 
     // CPU EXPANSION
+    // cpu levels is multiplied by two to ensure that data ends up in tasks1, this allows us to always copy tasks1 without worry like before hybrid cpu approach
     for (int i = 0; i < 2 * CPU_LEVELS_x2 && !(*host_data.maximal_expansion); i++) {
         cpu_expand(input_graph, host_data, host_cliques);
     
