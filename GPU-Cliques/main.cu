@@ -399,12 +399,11 @@ __device__ __forceinline int device_get_mindeg(int number_of_members, GPU_Data& 
 // TODO - test program on larger graphs
 // TODO - increase thread usage by monitoring and improving memory usage, consult gpu videos
 
-// TODO NOW
+// TODO NOW (HIGH PRIORITY)
 // TODO - correct and improve parallelization of LU pruning
 // TODO - optimize code on CPU with improvements made on the GPU code
 // TODO - implement cover pruning on cpu section and consider critical and cover pruning for gpu section
 // TODO - optimize cpu sort_vertices method like gpu
-// TODO - make consistent method names for cpu and gpu h vs d
 // TODO - make methods for ul bounds, and loose ul bounds to compare them directly
 // TODO - fill tasks kernel does not always need to launch can check outside of kernel to determine so
 
@@ -415,8 +414,11 @@ __device__ __forceinline int device_get_mindeg(int number_of_members, GPU_Data& 
 // TODO - look at how Quick constructs graph and other things for optimization tricks
 // TODO - label for vertices can be a byte rather than int
 // TODO - change gpu lower-upper bound and min_ext_deg to be lower case
+// TODO - make consistent method names for cpu and gpu h vs d
 
 // UNSURE - still not really sure how local memory works for gpu threads and why program cant utilize all threads
+
+// NOTE - crticial vertex pruning migth be pretty effective, seems to do a lot on cpu version. If Quick paper didnt count the second wave of lu pruning that can be done with it they might have understated its effect
 
 // IMPORTANT - lets call our current traversal stragetgy "wide-dfs", we should consider starting the cpu in bfs, say the first 3 levels then go back to the wide-dfs, would allow the extra pruning of the cpu to apply to all
 //             branches of the expansion tree equally, it would "nip the expansion tree in the bud"
@@ -426,8 +428,6 @@ __device__ __forceinline int device_get_mindeg(int number_of_members, GPU_Data& 
 // 
 //             Logic - heavily prune lower levels on the cpu where pruning is most effective, continue expansion on the cpu normally until growth tapers out, trnasfer to gpu to when memory usage is slow to take advntage of 
 //                     parrallel processing power
-
-// NOTE - crticial vertex pruning migth be pretty effective, seems to do a lot on cpu version. If Quick paper didnt count the second wave of lu pruning that can be done with it they might have understated its effect
 
 
 
