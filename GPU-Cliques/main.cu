@@ -394,6 +394,11 @@ __device__ __forceinline int device_get_mindeg(int number_of_members, GPU_Data& 
 
 
 
+// 1 - loose lu bounds on gpu
+// 2 - criticial vertex on gpu
+// 3 - cpu hybrid dfs-bfs expansion
+// 4 - cover pruning on cpu
+
 // TODO GENERALLY
 // TODO - various TODO and UNSURE in program, use ^f
 // TODO - test program on larger graphs
