@@ -46,7 +46,7 @@ using namespace std;
 #define WARP_SIZE 32
 
 // run settings
-#define CPU_LEVELS_x2 50
+#define CPU_LEVELS_x2 1
 
 // VERTEX DATA
 struct Vertex
@@ -584,7 +584,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
         // DEBUG
         //print_WClique_Buffers(dd);
         //print_WTask_Buffers(dd);
-        //if (print_Warp_Data_Sizes_Every(dd, 1)) {break;}
+        if (print_Warp_Data_Sizes_Every(dd, 1)) {break;}
         //print_All_Warp_Data_Sizes_Every(dd, 1);
 
         // consolidate all the warp tasks/cliques buffers into the next global tasks array, buffer, and cliques
@@ -3761,10 +3761,6 @@ __device__ void calculate_loose_LU_bounds(GPU_Data& dd, Warp_Data& wd, Local_Dat
         {
             // lower
             wd.Lower_bound[ld.warp_in_block_idx] = device_get_mindeg(wd.number_of_members[ld.warp_in_block_idx], dd) - min_clq_indeg;
-
-            if (wd.min_clq_indeg[ld.warp_in_block_idx] + wd.Lower_bound[ld.warp_in_block_idx] < dd.minimum_degrees[wd.number_of_members[ld.warp_in_block_idx] + wd.Lower_bound[ld.warp_in_block_idx]]) {
-                wd.invalid_bounds[ld.warp_in_block_idx] = true;
-            }
 
             // upper
             wd.Upper_bound[ld.warp_in_block_idx] = floor(wd.min_clq_totaldeg[ld.warp_in_block_idx] / (*(dd.minimum_degree_ratio))) + 1 - wd.number_of_members[ld.warp_in_block_idx];
