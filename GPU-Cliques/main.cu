@@ -3429,7 +3429,7 @@ __device__ int critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& 
     int pvertexid;
     bool failed_found;
 
-    // CRITICAL VERTEX PRUNING
+    // CRITICAL VERTEX PRUNING 
     set<int> critical_vertex_neighbors;
     // adj_counter[0] = 10, means that the vertex at position 0 in new_vertices has 10 critical vertices neighbors within 2 hops
     int* adj_counters = new int[wd.total_vertices[ld.warp_in_block_idx]];
