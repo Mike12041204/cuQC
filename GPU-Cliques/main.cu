@@ -1806,12 +1806,12 @@ int h_critical_vertex_pruning(CPU_Graph& graph, Vertex* new_vertices, int& total
 
     bool method_return;
 
+    // CRITICAL VERTEX PRUNING
     set<int> critical_vertex_neighbors;
     // adj_counter[0] = 10, means that the vertex at position 0 in new_vertices has 10 critical vertices neighbors within 2 hops
     int* adj_counters = new int[total_new_vertices];
     memset(adj_counters, 0, sizeof(int) * total_new_vertices);
 
-    // CRITICAL VERTEX PRUNING
     // iterate through all vertices in clique
     for (int k = 0; k < number_of_new_vertices; k++)
     {
@@ -3421,6 +3421,148 @@ __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
         return 2;
     }
    
+    return 0;
+}
+
+__device__ int critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
+{
+    int pvertexid;
+    bool failed_found;
+
+    // CRITICAL VERTEX PRUNING
+    set<int> critical_vertex_neighbors;
+    // adj_counter[0] = 10, means that the vertex at position 0 in new_vertices has 10 critical vertices neighbors within 2 hops
+    int* adj_counters = new int[wd.total_vertices[ld.warp_in_block_idx]];
+    memset(adj_counters, 0, sizeof(int) * wd.total_vertices[ld.warp_in_block_idx]);
+
+    // iterate through all vertices in clique
+    for (int k = 0; k < number_of_new_vertices; k++)
+    {
+        // if they are a critical vertex
+        if (new_vertices[k].indeg + new_vertices[k].exdeg == minimum_degrees[number_of_new_vertices + lower_bound] && new_vertices[k].exdeg > 0) {
+
+            // iterate through all neighbors
+            pvertexid = new_vertices[k].vertexid;
+            pneighbors_start = graph.onehop_offsets[pvertexid];
+            pneighbors_end = graph.onehop_offsets[pvertexid + 1];
+            for (uint64_t l = pneighbors_start; l < pneighbors_end; l++) {
+                int neighbor_id = graph.onehop_neighbors[l];
+                int position_of_neighbor = linear_search_vertices(new_vertices, total_new_vertices, neighbor_id);
+
+                // if neighbor is cand
+                if (position_of_neighbor != -1) {
+                    if (new_vertices[position_of_neighbor].label == 0) {
+                        critical_vertex_neighbors.insert(neighbor_id);
+                        new_vertices[position_of_neighbor].label = 4;
+                    }
+                }
+            }
+        }
+    }
+
+    // if there were any neighbors of critical vertices
+    if (critical_vertex_neighbors.size() > 0)
+    {
+        // sort vertices so that critical vertex adjacent candidates are immediately after vertices within the clique
+        qsort(new_vertices, total_new_vertices, sizeof(Vertex), sort_vertices);
+
+        // iterate through all neighbors
+        for (int neighbor : critical_vertex_neighbors) {
+            // update 1hop adj
+            pneighbors_start = graph.onehop_offsets[neighbor];
+            pneighbors_end = graph.onehop_offsets[neighbor + 1];
+            for (uint64_t k = pneighbors_start; k < pneighbors_end; k++) {
+                int neighbor_of_added_vertex = graph.onehop_neighbors[k];
+                int position_of_neighbor = linear_search_vertices(new_vertices, total_new_vertices, neighbor_of_added_vertex);
+                if (position_of_neighbor != -1) {
+                    new_vertices[position_of_neighbor].indeg++;
+                    new_vertices[position_of_neighbor].exdeg--;
+                }
+            }
+
+            // track 2hop adj
+            pneighbors_start = graph.twohop_offsets[neighbor];
+            pneighbors_end = graph.twohop_offsets[neighbor + 1];
+            for (uint64_t k = pneighbors_start; k < pneighbors_end; k++) {
+                int neighbor_of_added_vertex = graph.twohop_neighbors[k];
+                int position_of_neighbor = linear_search_vertices(new_vertices, total_new_vertices, neighbor_of_added_vertex);
+                if (position_of_neighbor != -1) {
+                    adj_counters[position_of_neighbor]++;
+                }
+            }
+        }
+
+        critical_fail = false;
+
+        // all vertices within the clique must be within 2hops of the newly added critical vertex adj vertices
+        for (int k = 0; k < number_of_new_vertices; k++) {
+            if (adj_counters[k] != critical_vertex_neighbors.size()) {
+                critical_fail = true;
+            }
+        }
+
+        // all critical adj vertices must all be within 2 hops of each other
+        for (int k = number_of_new_vertices; k < number_of_new_vertices + critical_vertex_neighbors.size(); k++) {
+            if (adj_counters[k] < critical_vertex_neighbors.size() - 1) {
+                critical_fail = true;
+            }
+        }
+
+        if (critical_fail) {
+            delete adj_counters;
+            return 2;
+        }
+
+        // no failed vertices found so add all critical vertex adj candidates to clique
+        for (int k = number_of_new_vertices; k < number_of_new_vertices + critical_vertex_neighbors.size(); k++) {
+            new_vertices[k].label = 1;
+        }
+        number_of_new_vertices += critical_vertex_neighbors.size();
+        number_of_new_candidates -= critical_vertex_neighbors.size();
+        qsort(new_vertices, total_new_vertices, sizeof(Vertex), sort_vertices);
+    }
+
+
+
+    // DIAMTER PRUNING
+    number_of_removed_candidates = 0;
+    // remove all cands who are not within 2hops of all newly added cands
+    for (int k = number_of_new_vertices; k < total_new_vertices; k++) {
+        if (adj_counters[k] != critical_vertex_neighbors.size()) {
+            new_vertices[k].label = -1;
+            number_of_removed_candidates++;
+        }
+    }
+    qsort(new_vertices, total_new_vertices, sizeof(Vertex), sort_vertices);
+
+    delete adj_counters;
+
+    // update exdeg of vertices connected to removed cands
+    h_update_degrees(graph, new_vertices, total_new_vertices, number_of_removed_candidates);
+
+    total_new_vertices -= number_of_removed_candidates;
+    number_of_new_candidates -= number_of_removed_candidates;
+
+    // continue if not enough vertices after pruning
+    if (wd.total_vertices[ld.warp_in_block_idx] < (*(dd.minimum_clique_size))) {
+        return 1;
+    }
+
+
+
+    // DEGREE BASED PRUNING
+    failed_found = degree_pruning_loose(dd, wd, ld);
+
+    // continue if not enough vertices after pruning
+    if (wd.total_vertices[ld.warp_in_block_idx] < (*(dd.minimum_clique_size))) {
+        return 1;
+    }
+
+    // if vertex in x found as not extendable continue to next iteration
+    if (failed_found || wd.invalid_bounds[ld.warp_in_block_idx]) {
+        return 2;
+    }
+
     return 0;
 }
 
