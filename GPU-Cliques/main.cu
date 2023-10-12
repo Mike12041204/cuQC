@@ -3480,20 +3480,21 @@ __device__ int critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& 
 
     // UNSURE - which for loop is better to parallelize
     // iterate through all vertices in clique
-    for (int k = (ld.idx % WARP_SIZE); k < wd.number_of_members[ld.warp_in_block_idx]; k+=WARP_SIZE){
+    for (int k = 0; k < wd.number_of_members[ld.warp_in_block_idx]; k++){
 
         // if they are a critical vertex
         if (ld.vertices[k].indeg + ld.vertices[k].exdeg == dd.minimum_degrees[wd.number_of_members[ld.warp_in_block_idx] + wd.Lower_bound[ld.warp_in_block_idx]] && ld.vertices[k].exdeg > 0) {
 
             // iterate through all candidates
             pvertexid = ld.vertices[k].vertexid;
-            for (int i = wd.number_of_members[ld.warp_in_block_idx]; i < wd.total_vertices[ld.warp_in_block_idx]; i++) {
+            for (int i = wd.number_of_members[ld.warp_in_block_idx] + (ld.idx % WARP_SIZE); i < wd.total_vertices[ld.warp_in_block_idx]; i+=WARP_SIZE) {
                 // if candidate is neighbor of critical vertex mark as such
                 if (device_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[pvertexid], dd.onehop_offsets[pvertexid + 1] - dd.onehop_offsets[pvertexid], ld.vertices[i].vertexid)) {
                     ld.vertices[i].label = 4;
                     number_of_critical_neighbors++;
                 }
             }
+            __syncwarp();
         }
     }
 
@@ -3509,10 +3510,10 @@ __device__ int critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& 
         device_sort(ld.vertices, wd.total_vertices[ld.warp_in_block_idx], (ld.idx % WARP_SIZE), sort_vert_ex);
 
         // iterate through all vertices and update their degrees as if critical adjacencies were added and keep track of how many critical adjacencies they are adjacent to
-        for (int k = (ld.idx % WARP_SIZE); k < wd.total_vertices[ld.warp_in_block_idx]; k+=WARP_SIZE) {
+        for (int k = 0; k < wd.total_vertices[ld.warp_in_block_idx]; k++) {
             pvertexid = ld.vertices[k].vertexid;
 
-            for (int l = wd.number_of_members[ld.warp_in_block_idx]; l < wd.number_of_members[ld.warp_in_block_idx] + number_of_critical_neighbors; l++) {
+            for (int l = wd.number_of_members[ld.warp_in_block_idx] + (ld.idx % WARP_SIZE); l < wd.number_of_members[ld.warp_in_block_idx] + number_of_critical_neighbors; l+=WARP_SIZE) {
                 if (device_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[ld.vertices[l].vertexid], dd.onehop_offsets[ld.vertices[l].vertexid + 1] - dd.onehop_offsets[ld.vertices[l].vertexid], pvertexid) != -1) {
                     ld.vertices[k].indeg++;
                     ld.vertices[k].exdeg--;
@@ -3522,6 +3523,7 @@ __device__ int critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& 
                     ld.adjacencies[k]++;
                 }
             }
+            __syncwarp();
         }
 
         failed_found = false;
@@ -3556,8 +3558,12 @@ __device__ int critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& 
         for (int k = wd.number_of_members[ld.warp_in_block_idx] + (ld.idx % WARP_SIZE); k < wd.number_of_members[ld.warp_in_block_idx] + number_of_critical_neighbors; k+=WARP_SIZE) {
             ld.vertices[k].label = 1;
         }
-        wd.number_of_members[ld.warp_in_block_idx] += number_of_critical_neighbors;
-        wd.number_of_candidates[ld.warp_in_block_idx] -= number_of_critical_neighbors;
+
+        if ((ld.idx % WARP_SIZE) == 0) {
+            wd.number_of_members[ld.warp_in_block_idx] += number_of_critical_neighbors;
+            wd.number_of_candidates[ld.warp_in_block_idx] -= number_of_critical_neighbors;
+        }
+        __syncwarp();
 
         // UNSURE - don't think I need to sort intra members, remove if so
         device_sort(ld.vertices, wd.total_vertices[ld.warp_in_block_idx], (ld.idx % WARP_SIZE), sort_vert_ex);
@@ -3568,7 +3574,7 @@ __device__ int critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& 
     // DIAMTER PRUNING
     number_of_removed_candidates = 0;
     // remove all cands who are not within 2hops of all newly added cands
-    for (int k = wd.number_of_members[ld.warp_in_block_idx]; k < wd.total_vertices[ld.warp_in_block_idx]; k++) {
+    for (int k = wd.number_of_members[ld.warp_in_block_idx] + (ld.idx % WARP_SIZE); k < wd.total_vertices[ld.warp_in_block_idx]; k+=WARP_SIZE) {
         if (ld.adjacencies[k] != number_of_critical_neighbors) {
             ld.vertices[k].label = -1;
             number_of_removed_candidates++;
@@ -3579,8 +3585,11 @@ __device__ int critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& 
     // update exdeg of vertices connected to removed cands
     update_degrees(dd, wd, ld, number_of_removed_candidates);
 
-    wd.total_vertices[ld.warp_in_block_idx] -= number_of_removed_candidates;
-    wd.number_of_candidates[ld.warp_in_block_idx] -= number_of_removed_candidates;
+    if ((ld.idx % WARP_SIZE) == 0) {
+        wd.total_vertices[ld.warp_in_block_idx] -= number_of_removed_candidates;
+        wd.number_of_candidates[ld.warp_in_block_idx] -= number_of_removed_candidates;
+    }
+    __syncwarp();
 
     // continue if not enough vertices after pruning
     if (wd.total_vertices[ld.warp_in_block_idx] < (*(dd.minimum_clique_size))) {
