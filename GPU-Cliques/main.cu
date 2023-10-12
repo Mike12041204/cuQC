@@ -36,9 +36,10 @@ using namespace std;
 #define WTASKS_SIZE 400000
 #define WTASKS_OFFSET_SIZE 40000
 #define WVERTICES_SIZE 40000
+#define WADJACENCIES_SIZE 40000
 
 // shared memory size: 12.300 ints
-#define VERTICES_SIZE 100
+#define VERTICES_SIZE 50
  
 // threads info
 #define BLOCK_SIZE 512
@@ -228,6 +229,7 @@ struct GPU_Data
     Vertex* wtasks_vertices;
 
     Vertex* wvertices;
+    int* wadjacencies;
 
     int* total_tasks;
 
@@ -283,6 +285,7 @@ struct Warp_Data
     int total_vertices[(BLOCK_SIZE / WARP_SIZE)];
 
     Vertex shared_vertices[VERTICES_SIZE * (BLOCK_SIZE / WARP_SIZE)];
+    int shared_adjacencies[VERTICES_SIZE * (BLOCK_SIZE / WARP_SIZE)];
 
     int minimum_external_degree[(BLOCK_SIZE / WARP_SIZE)];
     int Lower_bound[(BLOCK_SIZE / WARP_SIZE)];
@@ -307,6 +310,8 @@ struct Local_Data
     uint64_t* read_count;
 
     Vertex* vertices;
+    int* adjacencies;
+
     int idx;
     int warp_in_block_idx;
 };
@@ -379,6 +384,7 @@ __device__ void check_for_clique(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
 __device__ void write_to_tasks(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
 __device__ void diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, int pvertexid);
 __device__ void update_degrees(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, int number_of_removed_candidates);
+__device__ int critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
 
 __device__ void calculate_LU_bounds(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
 __device__ void calculate_loose_LU_bounds(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
@@ -400,7 +406,12 @@ __device__ int device_get_mindeg(int number_of_members, GPU_Data& dd);
 
 
 
-// 2 - criticial vertex on gpu
+// ASK - think trying to reduce local variables in for loops might be making program slower
+// UNSURE - is one branch of update degrees better than the other
+// NOTE - program is very slow!
+
+// 1 - criticial vertex on gpu
+// 2 - level 0 pruning
 // 3 - cpu hybrid dfs-bfs expansion
 // 4 - cover pruning on cpu
 
@@ -413,6 +424,7 @@ __device__ int device_get_mindeg(int number_of_members, GPU_Data& dd);
 // TODO - optimize cpu sort_vertices method like gpu
 // TODO - fill tasks kernel does not always need to launch can check outside of kernel to determine so
 // TODO - combine add one vertex into the copying from tasks
+// TODO - remove adjacencies in shared memory
 
 // TODO EVENTUALLY (LOW PRIORITY)
 // TODO - reevaluate and change where uint64_t's are used
@@ -700,6 +712,9 @@ void allocate_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_clique
     chkerr(cudaMemset(dd.wtasks_count, 0, sizeof(uint64_t) * number_of_warps));
 
     chkerr(cudaMalloc((void**)&dd.wvertices, (sizeof(Vertex) * WVERTICES_SIZE) * number_of_warps));
+    chkerr(cudaMalloc((void**)&dd.wadjacencies, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
+
+    chkerr(cudaMemset(dd.wadjacencies, 0, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
 
     chkerr(cudaMalloc((void**)&dd.maximal_expansion, sizeof(bool)));
     chkerr(cudaMalloc((void**)&dd.dumping_cliques, sizeof(bool)));
@@ -1159,6 +1174,7 @@ void free_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_cliques)
     chkerr(cudaFree(dd.wtasks_vertices));
 
     chkerr(cudaFree(dd.wvertices));
+    chkerr(cudaFree(dd.wadjacencies));
 
     chkerr(cudaFree(dd.maximal_expansion));
     chkerr(cudaFree(dd.dumping_cliques));
@@ -3046,8 +3062,15 @@ __global__ void expand_level(GPU_Data dd)
             // select whether to store vertices in global or shared memory based on size
             if (wd.total_vertices[ld.warp_in_block_idx] <= VERTICES_SIZE) {
                 ld.vertices = wd.shared_vertices + (VERTICES_SIZE * ld.warp_in_block_idx);
+                ld.adjacencies = wd.shared_adjacencies + (VERTICES_SIZE * ld.warp_in_block_idx);
+
+                // intialize adjacencies array to all zeros for critical vertex pruning later
+                for (int k = (ld.idx % WARP_SIZE); k < wd.total_vertices[ld.warp_in_block_idx]; k += WARP_SIZE) {
+                    ld.adjacencies[k] = 0;
+                }
             } else {
                 ld.vertices = dd.wvertices + (WVERTICES_SIZE * (ld.idx / WARP_SIZE));
+                ld.adjacencies = dd.wadjacencies + (WVERTICES_SIZE * (ld.idx / WARP_SIZE));
             }
 
             for (int k = (ld.idx % WARP_SIZE); k < wd.total_vertices[ld.warp_in_block_idx]; k += WARP_SIZE) {
@@ -3058,6 +3081,22 @@ __global__ void expand_level(GPU_Data dd)
 
             // ADD ONE VERTEX
             method_return = add_one_vertex(dd, wd, ld);
+            // too many vertices pruned continue, no need to check as not enough vertices
+            if (method_return == 1) {
+                continue;
+            }
+
+            // if failed found check for clique and continue on to the next iteration
+            if (method_return == 2) {
+                if (wd.number_of_members[ld.warp_in_block_idx] >= (*dd.minimum_clique_size)) {
+                    check_for_clique(dd, wd, ld);
+                }
+            }
+
+
+
+            // CRITICAL VERTEX PRUNING
+            method_return = critical_vertex_pruning(dd, wd, ld);
             // too many vertices pruned continue, no need to check as not enough vertices
             if (method_return == 1) {
                 continue;
@@ -3424,102 +3463,104 @@ __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     return 0;
 }
 
+// TODO - improve sort function for this method and others do only check necessary conditions
+// TODO - parallelize for loops
+// returns 2, if too many vertices pruned to be considered, 1 if failed found or invalid bound, 0 otherwise
 __device__ int critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 {
     int pvertexid;
     bool failed_found;
+    int number_of_removed_candidates;
+    int number_of_critical_neighbors;
+
+
 
     // CRITICAL VERTEX PRUNING 
-    set<int> critical_vertex_neighbors;
-    // adj_counter[0] = 10, means that the vertex at position 0 in new_vertices has 10 critical vertices neighbors within 2 hops
-    int* adj_counters = new int[wd.total_vertices[ld.warp_in_block_idx]];
-    memset(adj_counters, 0, sizeof(int) * wd.total_vertices[ld.warp_in_block_idx]);
+    number_of_critical_neighbors = 0;
 
+    // UNSURE - which for loop is better to parallelize
     // iterate through all vertices in clique
-    for (int k = 0; k < number_of_new_vertices; k++)
-    {
+    for (int k = (ld.idx % WARP_SIZE); k < wd.number_of_members[ld.warp_in_block_idx]; k+=WARP_SIZE){
+
         // if they are a critical vertex
-        if (new_vertices[k].indeg + new_vertices[k].exdeg == minimum_degrees[number_of_new_vertices + lower_bound] && new_vertices[k].exdeg > 0) {
+        if (ld.vertices[k].indeg + ld.vertices[k].exdeg == dd.minimum_degrees[wd.number_of_members[ld.warp_in_block_idx] + wd.Lower_bound[ld.warp_in_block_idx]] && ld.vertices[k].exdeg > 0) {
 
-            // iterate through all neighbors
-            pvertexid = new_vertices[k].vertexid;
-            pneighbors_start = graph.onehop_offsets[pvertexid];
-            pneighbors_end = graph.onehop_offsets[pvertexid + 1];
-            for (uint64_t l = pneighbors_start; l < pneighbors_end; l++) {
-                int neighbor_id = graph.onehop_neighbors[l];
-                int position_of_neighbor = linear_search_vertices(new_vertices, total_new_vertices, neighbor_id);
-
-                // if neighbor is cand
-                if (position_of_neighbor != -1) {
-                    if (new_vertices[position_of_neighbor].label == 0) {
-                        critical_vertex_neighbors.insert(neighbor_id);
-                        new_vertices[position_of_neighbor].label = 4;
-                    }
+            // iterate through all candidates
+            pvertexid = ld.vertices[k].vertexid;
+            for (int i = wd.number_of_members[ld.warp_in_block_idx]; i < wd.total_vertices[ld.warp_in_block_idx]; i++) {
+                // if candidate is neighbor of critical vertex mark as such
+                if (device_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[pvertexid], dd.onehop_offsets[pvertexid + 1] - dd.onehop_offsets[pvertexid], ld.vertices[i].vertexid)) {
+                    ld.vertices[i].label = 4;
+                    number_of_critical_neighbors++;
                 }
             }
         }
     }
 
+    // sum number of critical neighbors
+    for (int k = 1; k < 32; k *= 2) {
+        number_of_removed_candidates += __shfl_xor_sync(0xFFFFFFFF, number_of_critical_neighbors, k);
+    }
+
     // if there were any neighbors of critical vertices
-    if (critical_vertex_neighbors.size() > 0)
+    if (number_of_critical_neighbors > 0)
     {
         // sort vertices so that critical vertex adjacent candidates are immediately after vertices within the clique
-        qsort(new_vertices, total_new_vertices, sizeof(Vertex), sort_vertices);
+        device_sort(ld.vertices, wd.total_vertices[ld.warp_in_block_idx], (ld.idx % WARP_SIZE), sort_vert_ex);
 
-        // iterate through all neighbors
-        for (int neighbor : critical_vertex_neighbors) {
-            // update 1hop adj
-            pneighbors_start = graph.onehop_offsets[neighbor];
-            pneighbors_end = graph.onehop_offsets[neighbor + 1];
-            for (uint64_t k = pneighbors_start; k < pneighbors_end; k++) {
-                int neighbor_of_added_vertex = graph.onehop_neighbors[k];
-                int position_of_neighbor = linear_search_vertices(new_vertices, total_new_vertices, neighbor_of_added_vertex);
-                if (position_of_neighbor != -1) {
-                    new_vertices[position_of_neighbor].indeg++;
-                    new_vertices[position_of_neighbor].exdeg--;
+        // iterate through all vertices and update their degrees as if critical adjacencies were added and keep track of how many critical adjacencies they are adjacent to
+        for (int k = (ld.idx % WARP_SIZE); k < wd.total_vertices[ld.warp_in_block_idx]; k+=WARP_SIZE) {
+            pvertexid = ld.vertices[k].vertexid;
+
+            for (int l = wd.number_of_members[ld.warp_in_block_idx]; l < wd.number_of_members[ld.warp_in_block_idx] + number_of_critical_neighbors; l++) {
+                if (device_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[ld.vertices[l].vertexid], dd.onehop_offsets[ld.vertices[l].vertexid + 1] - dd.onehop_offsets[ld.vertices[l].vertexid], pvertexid) != -1) {
+                    ld.vertices[k].indeg++;
+                    ld.vertices[k].exdeg--;
                 }
-            }
 
-            // track 2hop adj
-            pneighbors_start = graph.twohop_offsets[neighbor];
-            pneighbors_end = graph.twohop_offsets[neighbor + 1];
-            for (uint64_t k = pneighbors_start; k < pneighbors_end; k++) {
-                int neighbor_of_added_vertex = graph.twohop_neighbors[k];
-                int position_of_neighbor = linear_search_vertices(new_vertices, total_new_vertices, neighbor_of_added_vertex);
-                if (position_of_neighbor != -1) {
-                    adj_counters[position_of_neighbor]++;
+                if (device_bsearch_array(dd.twohop_neighbors + dd.twohop_offsets[ld.vertices[l].vertexid], dd.twohop_offsets[ld.vertices[l].vertexid + 1] - dd.twohop_offsets[ld.vertices[l].vertexid], pvertexid) != -1) {
+                    ld.adjacencies[k]++;
                 }
             }
         }
 
-        critical_fail = false;
+        failed_found = false;
 
         // all vertices within the clique must be within 2hops of the newly added critical vertex adj vertices
-        for (int k = 0; k < number_of_new_vertices; k++) {
-            if (adj_counters[k] != critical_vertex_neighbors.size()) {
-                critical_fail = true;
+        for (int k = (ld.idx % WARP_SIZE); k < wd.number_of_members[ld.warp_in_block_idx]; k+=WARP_SIZE) {
+            if (ld.adjacencies[k] != number_of_critical_neighbors) {
+                failed_found = true;
+                break;
             }
+        }
+
+        failed_found = __any_sync(0xFFFFFFFF, failed_found);
+        if (failed_found) {
+            return 2;
         }
 
         // all critical adj vertices must all be within 2 hops of each other
-        for (int k = number_of_new_vertices; k < number_of_new_vertices + critical_vertex_neighbors.size(); k++) {
-            if (adj_counters[k] < critical_vertex_neighbors.size() - 1) {
-                critical_fail = true;
+        for (int k = wd.number_of_members[ld.warp_in_block_idx] + (ld.idx % WARP_SIZE); k < wd.number_of_members[ld.warp_in_block_idx] + number_of_critical_neighbors; k+=WARP_SIZE) {
+            if (ld.adjacencies[k] < number_of_critical_neighbors - 1) {
+                failed_found = true;
+                break;
             }
         }
 
-        if (critical_fail) {
-            delete adj_counters;
+        failed_found = __any_sync(0xFFFFFFFF, failed_found);
+        if (failed_found) {
             return 2;
         }
 
         // no failed vertices found so add all critical vertex adj candidates to clique
-        for (int k = number_of_new_vertices; k < number_of_new_vertices + critical_vertex_neighbors.size(); k++) {
-            new_vertices[k].label = 1;
+        for (int k = wd.number_of_members[ld.warp_in_block_idx] + (ld.idx % WARP_SIZE); k < wd.number_of_members[ld.warp_in_block_idx] + number_of_critical_neighbors; k+=WARP_SIZE) {
+            ld.vertices[k].label = 1;
         }
-        number_of_new_vertices += critical_vertex_neighbors.size();
-        number_of_new_candidates -= critical_vertex_neighbors.size();
-        qsort(new_vertices, total_new_vertices, sizeof(Vertex), sort_vertices);
+        wd.number_of_members[ld.warp_in_block_idx] += number_of_critical_neighbors;
+        wd.number_of_candidates[ld.warp_in_block_idx] -= number_of_critical_neighbors;
+
+        // UNSURE - don't think I need to sort intra members, remove if so
+        device_sort(ld.vertices, wd.total_vertices[ld.warp_in_block_idx], (ld.idx % WARP_SIZE), sort_vert_ex);
     }
 
 
@@ -3527,21 +3568,19 @@ __device__ int critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& 
     // DIAMTER PRUNING
     number_of_removed_candidates = 0;
     // remove all cands who are not within 2hops of all newly added cands
-    for (int k = number_of_new_vertices; k < total_new_vertices; k++) {
-        if (adj_counters[k] != critical_vertex_neighbors.size()) {
-            new_vertices[k].label = -1;
+    for (int k = wd.number_of_members[ld.warp_in_block_idx]; k < wd.total_vertices[ld.warp_in_block_idx]; k++) {
+        if (ld.adjacencies[k] != number_of_critical_neighbors) {
+            ld.vertices[k].label = -1;
             number_of_removed_candidates++;
         }
     }
-    qsort(new_vertices, total_new_vertices, sizeof(Vertex), sort_vertices);
-
-    delete adj_counters;
+    device_sort(ld.vertices, wd.total_vertices[ld.warp_in_block_idx], (ld.idx % WARP_SIZE), sort_vert_ex);
 
     // update exdeg of vertices connected to removed cands
-    h_update_degrees(graph, new_vertices, total_new_vertices, number_of_removed_candidates);
+    update_degrees(dd, wd, ld, number_of_removed_candidates);
 
-    total_new_vertices -= number_of_removed_candidates;
-    number_of_new_candidates -= number_of_removed_candidates;
+    wd.total_vertices[ld.warp_in_block_idx] -= number_of_removed_candidates;
+    wd.number_of_candidates[ld.warp_in_block_idx] -= number_of_removed_candidates;
 
     // continue if not enough vertices after pruning
     if (wd.total_vertices[ld.warp_in_block_idx] < (*(dd.minimum_clique_size))) {
