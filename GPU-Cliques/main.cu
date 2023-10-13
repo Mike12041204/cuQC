@@ -586,14 +586,12 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
     // TIME
     int deviceId;
     cudaGetDevice(&deviceId);
-
     cudaDeviceProp props;
     cudaGetDeviceProperties(&props, deviceId);
-
     int crate = props.clockRate; // Clock rate in kHz
     chkerr(cudaMemcpy(dd.clock_rate, &crate, sizeof(int), cudaMemcpyHostToDevice));
 
-    cout << crate << endl;
+
 
     // EXPAND LEVEL
     cout << ">:BEGINNING EXPANSION" << endl;
