@@ -47,7 +47,7 @@ using namespace std;
 #define WARP_SIZE 32
 
 // run settings
-#define CPU_LEVELS_x2 0
+#define CPU_LEVELS_x2 1
 
 // debug setting
 #define NUM_OF_TIMES 11
@@ -1824,6 +1824,7 @@ void h_check_for_clique(CPU_Cliques& host_cliques, Vertex* new_vertices, int num
     }
 }
 
+// TODO - improve like gpu version
 // returns 2 if too many vertices pruned or a critical vertex fail, returns 1 if failed found or invalid bounds, else 0
 int h_critical_vertex_pruning(CPU_Graph& graph, Vertex* new_vertices, int& total_new_vertices, int& number_of_new_candidates, int& number_of_new_vertices, int& upper_bound, int& lower_bound, int& minimum_external_degree)
 {
