@@ -251,8 +251,6 @@ struct GPU_Data
     // DEBUG
     bool* debug;
     int* idebug;
-    clock_t* tdebug;
-    int* clock_rate;
 
     // GPU GRAPH
     int* number_of_vertices;
@@ -583,16 +581,6 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
     //print_GPU_Data(dd);
     //print_Data_Sizes(dd);
 
-    // TIME
-    int deviceId;
-    cudaGetDevice(&deviceId);
-    cudaDeviceProp props;
-    cudaGetDeviceProperties(&props, deviceId);
-    int crate = props.clockRate; // Clock rate in kHz
-    chkerr(cudaMemcpy(dd.clock_rate, &crate, sizeof(int), cudaMemcpyHostToDevice));
-
-
-
     // EXPAND LEVEL
     cout << ">:BEGINNING EXPANSION" << endl;
     while (!(*host_data.maximal_expansion))
@@ -610,7 +598,6 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
         //print_WClique_Buffers(dd);
         //print_WTask_Buffers(dd);
         if (print_Warp_Data_Sizes_Every(dd, 1)) {break;}
-        print_times(dd, crate);
         //print_All_Warp_Data_Sizes_Every(dd, 1);
 
         // consolidate all the warp tasks/cliques buffers into the next global tasks array, buffer, and cliques
@@ -782,12 +769,9 @@ void allocate_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_clique
     // DEBUG
     chkerr(cudaMalloc((void**)&dd.debug, sizeof(bool)));
     chkerr(cudaMalloc((void**)&dd.idebug, sizeof(int)));
-    chkerr(cudaMalloc((void**)&dd.tdebug, number_of_warps * NUM_OF_TIMES * sizeof(clock_t)));
-    chkerr(cudaMalloc((void**)&dd.clock_rate, sizeof(int)));
 
     chkerr(cudaMemset(dd.debug, false, sizeof(bool)));
     chkerr(cudaMemset(dd.idebug, 0, sizeof(int)));
-    chkerr(cudaMemset(dd.tdebug, 0, number_of_warps * NUM_OF_TIMES * sizeof(clock_t)));
 }
 
 // processes 0th and 1st level of expansion
@@ -1224,8 +1208,6 @@ void free_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_cliques)
     //DEBUG
     chkerr(cudaFree(dd.debug));
     chkerr(cudaFree(dd.idebug));
-    chkerr(cudaFree(dd.tdebug));
-    chkerr(cudaFree(dd.clock_rate));
 }
 
 
@@ -2988,66 +2970,6 @@ void print_vertices(Vertex* vertices, int size)
     cout << endl;
 }
 
-void print_times(GPU_Data& dd, int crate)
-{
-    int clock_per_ms = crate / 1000;
-    const int number_of_warps = (NUM_OF_BLOCKS * BLOCK_SIZE) / WARP_SIZE;
-
-    uint64_t* current_level = new uint64_t;
-    uint64_t* tasks_count = new uint64_t;
-
-    chkerr(cudaMemcpy(current_level, dd.current_level, sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    cudaDeviceSynchronize();
-    if ((*current_level) % 2 == 1) {
-        chkerr(cudaMemcpy(tasks_count, dd.tasks1_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    }
-    else {
-        chkerr(cudaMemcpy(tasks_count, dd.tasks2_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    }
-    cudaDeviceSynchronize();
-
-    clock_t tdebug[number_of_warps * NUM_OF_TIMES];
-    chkerr(cudaMemcpy(tdebug, dd.tdebug, number_of_warps * NUM_OF_TIMES * sizeof(clock_t), cudaMemcpyDeviceToHost));
-    cudaDeviceSynchronize();
-
-    int max = 0;
-
-    uint64_t averages[NUM_OF_TIMES];
-    for (int i = 0; i < NUM_OF_TIMES; i++) {
-        averages[i] = static_cast<uint64_t>(tdebug[i]);
-    }
-
-    for (int i = 1; i < (*tasks_count); i++) {
-        for (int j = 0; j < NUM_OF_TIMES; j++) {
-            averages[j] += static_cast<uint64_t>(tdebug[(i * NUM_OF_TIMES) + j]);
-        }
-
-        if (tdebug[i * NUM_OF_TIMES] > tdebug[max * NUM_OF_TIMES]) {
-            max = i;
-        }
-    }
-
-    for (int i = 0; i < NUM_OF_TIMES; i++) {
-        averages[i] = averages[i] / (*tasks_count);
-    }
-
-    // print
-    cout << "   Average" << endl;
-    for (int i = 0; i < NUM_OF_TIMES; i++) {
-        cout << i << ": " << static_cast<double>(averages[i]) / clock_per_ms << " ms" << endl;
-    }
-    cout << "   Slowest Task" << endl;
-    for (int i = 0; i < NUM_OF_TIMES; i++) {
-        cout << i << ": " << static_cast<double>(tdebug[(max * NUM_OF_TIMES) + i]) / clock_per_ms << " ms" << endl;
-    }
-
-    chkerr(cudaMemset(dd.tdebug, 0, number_of_warps * NUM_OF_TIMES * sizeof(clock_t)));
-
-    delete current_level;
-    delete tasks_count;
-    //delete tdebug;
-}
-
 
 
 // --- DEVICE KERNELS ---
@@ -3064,21 +2986,6 @@ __global__ void expand_level(GPU_Data dd)
     // initialize variables
     ld.idx = (blockIdx.x * blockDim.x + threadIdx.x);
     ld.warp_in_block_idx = ((ld.idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE));
-
-
-
-    // TIME
-    clock_t stime0;
-    clock_t stime1;
-    clock_t stime;
-    clock_t etime;
-    __syncwarp();
-    if ((ld.idx % WARP_SIZE) == 0) {
-        stime0 = clock();
-        stime = clock();
-    }
-
-
 
     /*
     * The program alternates between reading and writing between to 'tasks' arrays in device global memory. The program will read from one tasks, expand to the next level by generating and pruning, then it will write to the
@@ -3129,25 +3036,9 @@ __global__ void expand_level(GPU_Data dd)
 
 
 
-        // TIME 
-        if ((ld.idx % WARP_SIZE) == 0) {
-            etime = clock();
-            dd.tdebug[((ld.idx / WARP_SIZE) * NUM_OF_TIMES) + 2] += (etime - stime);
-            stime1 = clock();
-        }
-
-
-
         // --- NEXT LEVEL ---
         for (int j = 0; j < wd.expansions[ld.warp_in_block_idx]; j++)
         {
-
-
-
-            // TIME
-            if ((ld.idx % WARP_SIZE) == 0) {
-                stime = clock();
-            }
 
 
 
@@ -3157,15 +3048,6 @@ __global__ void expand_level(GPU_Data dd)
                 if (method_return) {
                     break;
                 }
-            }
-
-
-
-            // TIME 
-            if ((ld.idx % WARP_SIZE) == 0) {
-                etime = clock();
-                dd.tdebug[((ld.idx / WARP_SIZE) * NUM_OF_TIMES) + 3] += (etime - stime);
-                stime = clock();
             }
 
 
@@ -3198,15 +3080,6 @@ __global__ void expand_level(GPU_Data dd)
 
 
 
-            // TIME 
-            if ((ld.idx % WARP_SIZE) == 0) {
-                etime = clock();
-                dd.tdebug[((ld.idx / WARP_SIZE) * NUM_OF_TIMES) + 4] += (etime - stime);
-                stime = clock();
-            }
-
-
-
             // ADD ONE VERTEX
             method_return = add_one_vertex(dd, wd, ld);
 
@@ -3220,15 +3093,6 @@ __global__ void expand_level(GPU_Data dd)
                 if (wd.number_of_members[ld.warp_in_block_idx] >= (*dd.minimum_clique_size)) {
                     check_for_clique(dd, wd, ld);
                 }
-            }
-
-
-
-            // TIME 
-            if ((ld.idx % WARP_SIZE) == 0) {
-                etime = clock();
-                dd.tdebug[((ld.idx / WARP_SIZE) * NUM_OF_TIMES) + 5] += (etime - stime);
-                stime = clock();
             }
 
 
@@ -3254,40 +3118,11 @@ __global__ void expand_level(GPU_Data dd)
 
 
 
-            // TIME 
-            if ((ld.idx % WARP_SIZE) == 0) {
-                etime = clock();
-                dd.tdebug[((ld.idx / WARP_SIZE) * NUM_OF_TIMES) + 6] += (etime - stime);
-                stime = clock();
-            }
-
-
-
             // WRITE TASKS TO BUFFERS
             if (wd.number_of_candidates[ld.warp_in_block_idx] > 0) {
                 write_to_tasks(dd, wd, ld);
             }
-
-
-
-            // TIME 
-            if ((ld.idx % WARP_SIZE) == 0) {
-                etime = clock();
-                dd.tdebug[((ld.idx / WARP_SIZE) * NUM_OF_TIMES) + 7] += (etime - stime);
-                stime = clock();
-            }
-
-
-
         }
-    }
-
-
-
-    // TIME
-    if ((ld.idx % WARP_SIZE) == 0) {
-        etime = clock();
-        dd.tdebug[((ld.idx / WARP_SIZE) * NUM_OF_TIMES) + 1] += (etime - stime1);
     }
 
 
@@ -3303,15 +3138,6 @@ __global__ void expand_level(GPU_Data dd)
         (*(dd.buffer_start)) = dd.buffer_offset[(*(dd.buffer_count))];
         (*(dd.cliques_offset_start)) = (*(dd.cliques_count)) + 1;
         (*(dd.cliques_start)) = dd.cliques_offset[(*(dd.cliques_count))];
-    }
-
-
-
-    // TIME
-    __syncwarp();
-    if ((ld.idx % WARP_SIZE) == 0) {
-        etime = clock();
-        dd.tdebug[((ld.idx / WARP_SIZE) * NUM_OF_TIMES)] += (etime - stime0);
     }
 }
 
