@@ -50,7 +50,7 @@ using namespace std;
 #define CPU_LEVELS_x2 0
 
 // debug setting
-#define NUM_OF_TIMES 8
+#define NUM_OF_TIMES 11
 
 // VERTEX DATA
 struct Vertex
@@ -377,7 +377,7 @@ void print_All_Warp_Data_Sizes_Every(GPU_Data& dd, int every);
 void print_debug(GPU_Data& dd);
 void print_idebug(GPU_Data& dd);
 void print_idebug(GPU_Data& dd);
-void print_times(GPU_Data& dd);
+void print_times(GPU_Data& dd, int crate);
 
 // KERNELS
 __global__ void expand_level(GPU_Data dd);
@@ -610,7 +610,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
         //print_WClique_Buffers(dd);
         //print_WTask_Buffers(dd);
         if (print_Warp_Data_Sizes_Every(dd, 1)) {break;}
-        print_times(dd);
+        print_times(dd, crate);
         //print_All_Warp_Data_Sizes_Every(dd, 1);
 
         // consolidate all the warp tasks/cliques buffers into the next global tasks array, buffer, and cliques
@@ -2987,8 +2987,11 @@ void print_vertices(Vertex* vertices, int size)
     cout << endl;
 }
 
-void print_times(GPU_Data& dd)
+void print_times(GPU_Data& dd, int crate)
 {
+    int clock_per_ms = crate / 1000;
+    const int number_of_warps = (NUM_OF_BLOCKS * BLOCK_SIZE) / WARP_SIZE;
+
     uint64_t* current_level = new uint64_t;
     uint64_t* tasks_count = new uint64_t;
 
@@ -3002,20 +3005,20 @@ void print_times(GPU_Data& dd)
     }
     cudaDeviceSynchronize();
 
-    clock_t* tdebug = new clock_t[(*tasks_count) * NUM_OF_TIMES];
-    chkerr(cudaMemcpy(tdebug, dd.tdebug, (*tasks_count) * NUM_OF_TIMES * sizeof(clock_t), cudaMemcpyDeviceToHost));
+    clock_t tdebug[number_of_warps * NUM_OF_TIMES];
+    chkerr(cudaMemcpy(tdebug, dd.tdebug, number_of_warps * NUM_OF_TIMES * sizeof(clock_t), cudaMemcpyDeviceToHost));
     cudaDeviceSynchronize();
 
     int max = 0;
 
-    clock_t averages[NUM_OF_TIMES];
+    uint64_t averages[NUM_OF_TIMES];
     for (int i = 0; i < NUM_OF_TIMES; i++) {
-        averages[i] = tdebug[i];
+        averages[i] = static_cast<uint64_t>(tdebug[i]);
     }
 
     for (int i = 1; i < (*tasks_count); i++) {
         for (int j = 0; j < NUM_OF_TIMES; j++) {
-            averages[j] += tdebug[(i * NUM_OF_TIMES) + j];
+            averages[j] += static_cast<uint64_t>(tdebug[(i * NUM_OF_TIMES) + j]);
         }
 
         if (tdebug[i * NUM_OF_TIMES] > tdebug[max * NUM_OF_TIMES]) {
@@ -3030,18 +3033,18 @@ void print_times(GPU_Data& dd)
     // print
     cout << "   Average" << endl;
     for (int i = 0; i < NUM_OF_TIMES; i++) {
-        cout << i << ": " << averages[i] << endl;
+        cout << i << ": " << static_cast<double>(averages[i]) / clock_per_ms << " ms" << endl;
     }
     cout << "   Slowest Task" << endl;
     for (int i = 0; i < NUM_OF_TIMES; i++) {
-        cout << i << ": " << tdebug[(max * NUM_OF_TIMES) + i] << endl;
+        cout << i << ": " << static_cast<double>(tdebug[(max * NUM_OF_TIMES) + i]) / clock_per_ms << " ms" << endl;
     }
 
-    chkerr(cudaMemset(dd.tdebug, 0, (*tasks_count) * NUM_OF_TIMES * sizeof(clock_t)));
+    chkerr(cudaMemset(dd.tdebug, 0, number_of_warps * NUM_OF_TIMES * sizeof(clock_t)));
 
     delete current_level;
     delete tasks_count;
-    delete tdebug;
+    //delete tdebug;
 }
 
 
@@ -3494,7 +3497,7 @@ __global__ void fill_from_buffer(GPU_Data dd)
     }
 }
 
-// returns 1 if lookahead succesful, 0 otherwise
+// returns 1 if lookahead succesful, 0 otherwise 
 __device__ int lookahead_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld) 
 {
     bool lookahead_sucess = true;
@@ -3575,6 +3578,13 @@ __device__ int remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 // returns 2, if too many vertices pruned to be considered, 1 if failed found or invalid bound, 0 otherwise
 __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld) 
 {
+    // TIME 
+    clock_t stime;
+    clock_t etime;
+    if ((ld.idx % WARP_SIZE) == 0) {
+        stime = clock();
+    }
+
     int pvertexid;
     bool failed_found;
 
@@ -3605,7 +3615,12 @@ __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     }
     __syncwarp();
 
-
+    // TIME 
+    if ((ld.idx % WARP_SIZE) == 0) {
+        etime = clock();
+        dd.tdebug[((ld.idx / WARP_SIZE) * NUM_OF_TIMES) + 8] += (etime - stime);
+        stime = clock();
+    }
 
     // DIAMETER PRUNING
     diameter_pruning(dd, wd, ld, pvertexid);
@@ -3615,10 +3630,21 @@ __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
         return 1;
     }
 
-
+    // TIME 
+    if ((ld.idx % WARP_SIZE) == 0) {
+        etime = clock();
+        dd.tdebug[((ld.idx / WARP_SIZE) * NUM_OF_TIMES) + 9] += (etime - stime);
+        stime = clock();
+    }
 
     // DEGREE BASED PRUNING
     failed_found = degree_pruning_loose(dd, wd, ld);
+
+    // TIME 
+    if ((ld.idx % WARP_SIZE) == 0) {
+        etime = clock();
+        dd.tdebug[((ld.idx / WARP_SIZE) * NUM_OF_TIMES) + 10] += (etime - stime);
+    }
 
     // continue if not enough vertices after pruning
     if (wd.total_vertices[ld.warp_in_block_idx] < (*(dd.minimum_clique_size))) {
@@ -3644,12 +3670,13 @@ __device__ int critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& 
     int number_of_removed_candidates;
     int number_of_critical_neighbors;
 
+    failed_found = false;
+
 
 
     // CRITICAL VERTEX PRUNING 
     number_of_critical_neighbors = 0;
 
-    // UNSURE - which for loop is better to parallelize
     // iterate through all vertices in clique
     for (int k = 0; k < wd.number_of_members[ld.warp_in_block_idx]; k++){
 
@@ -3659,10 +3686,12 @@ __device__ int critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& 
             // iterate through all candidates
             pvertexid = ld.vertices[k].vertexid;
             for (int i = wd.number_of_members[ld.warp_in_block_idx] + (ld.idx % WARP_SIZE); i < wd.total_vertices[ld.warp_in_block_idx]; i+=WARP_SIZE) {
-                // if candidate is neighbor of critical vertex mark as such
-                if (device_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[pvertexid], dd.onehop_offsets[pvertexid + 1] - dd.onehop_offsets[pvertexid], ld.vertices[i].vertexid)) {
-                    ld.vertices[i].label = 4;
-                    number_of_critical_neighbors++;
+                if (ld.vertices[i].label != 4) {
+                    // if candidate is neighbor of critical vertex mark as such
+                    if (device_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[pvertexid], dd.onehop_offsets[pvertexid + 1] - dd.onehop_offsets[pvertexid], ld.vertices[i].vertexid)) {
+                        ld.vertices[i].label = 4;
+                        number_of_critical_neighbors++;
+                    }
                 }
             }
             __syncwarp();
@@ -3671,20 +3700,21 @@ __device__ int critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& 
 
     // sum number of critical neighbors
     for (int k = 1; k < 32; k *= 2) {
-        number_of_removed_candidates += __shfl_xor_sync(0xFFFFFFFF, number_of_critical_neighbors, k);
+        number_of_critical_neighbors += __shfl_xor_sync(0xFFFFFFFF, number_of_critical_neighbors, k);
     }
 
     // if there were any neighbors of critical vertices
     if (number_of_critical_neighbors > 0)
     {
+        // TODO - only need to sort cands and critical adj
         // sort vertices so that critical vertex adjacent candidates are immediately after vertices within the clique
         device_sort(ld.vertices, wd.total_vertices[ld.warp_in_block_idx], (ld.idx % WARP_SIZE), sort_vert_ex);
 
         // iterate through all vertices and update their degrees as if critical adjacencies were added and keep track of how many critical adjacencies they are adjacent to
-        for (int k = 0; k < wd.total_vertices[ld.warp_in_block_idx]; k++) {
+        for (int k = (ld.idx % WARP_SIZE); k < wd.total_vertices[ld.warp_in_block_idx]; k += WARP_SIZE) {
             pvertexid = ld.vertices[k].vertexid;
 
-            for (int l = wd.number_of_members[ld.warp_in_block_idx] + (ld.idx % WARP_SIZE); l < wd.number_of_members[ld.warp_in_block_idx] + number_of_critical_neighbors; l+=WARP_SIZE) {
+            for (int l = wd.number_of_members[ld.warp_in_block_idx]; l < wd.number_of_members[ld.warp_in_block_idx] + number_of_critical_neighbors; l++) {
                 if (device_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[ld.vertices[l].vertexid], dd.onehop_offsets[ld.vertices[l].vertexid + 1] - dd.onehop_offsets[ld.vertices[l].vertexid], pvertexid) != -1) {
                     ld.vertices[k].indeg++;
                     ld.vertices[k].exdeg--;
@@ -3694,10 +3724,8 @@ __device__ int critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& 
                     ld.adjacencies[k]++;
                 }
             }
-            __syncwarp();
         }
-
-        failed_found = false;
+        __syncwarp();
 
         // all vertices within the clique must be within 2hops of the newly added critical vertex adj vertices
         for (int k = (ld.idx % WARP_SIZE); k < wd.number_of_members[ld.warp_in_block_idx]; k+=WARP_SIZE) {
@@ -3706,7 +3734,6 @@ __device__ int critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& 
                 break;
             }
         }
-
         failed_found = __any_sync(0xFFFFFFFF, failed_found);
         if (failed_found) {
             return 2;
@@ -3714,12 +3741,11 @@ __device__ int critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& 
 
         // all critical adj vertices must all be within 2 hops of each other
         for (int k = wd.number_of_members[ld.warp_in_block_idx] + (ld.idx % WARP_SIZE); k < wd.number_of_members[ld.warp_in_block_idx] + number_of_critical_neighbors; k+=WARP_SIZE) {
-            if (ld.adjacencies[k] < number_of_critical_neighbors - 1) {
+            if (ld.adjacencies[k] != number_of_critical_neighbors - 1) {
                 failed_found = true;
                 break;
             }
         }
-
         failed_found = __any_sync(0xFFFFFFFF, failed_found);
         if (failed_found) {
             return 2;
@@ -3750,6 +3776,9 @@ __device__ int critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& 
             ld.vertices[k].label = -1;
             number_of_removed_candidates++;
         }
+    }
+    for (int k = 1; k < 32; k *= 2) {
+        number_of_removed_candidates += __shfl_xor_sync(0xFFFFFFFF, number_of_removed_candidates, k);
     }
     device_sort(ld.vertices, wd.total_vertices[ld.warp_in_block_idx], (ld.idx % WARP_SIZE), sort_vert_ex);
 
