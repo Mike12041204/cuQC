@@ -375,7 +375,6 @@ void print_All_Warp_Data_Sizes_Every(GPU_Data& dd, int every);
 void print_debug(GPU_Data& dd);
 void print_idebug(GPU_Data& dd);
 void print_idebug(GPU_Data& dd);
-void print_times(GPU_Data& dd, int crate);
 
 // KERNELS
 __global__ void expand_level(GPU_Data dd);
