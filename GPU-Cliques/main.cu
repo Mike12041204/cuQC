@@ -23,7 +23,7 @@ using namespace std;
 
 // global memory size: 1.500.000.000 ints
 #define TASKS_SIZE 2000000
-#define EXPAND_THRESHOLD 176
+#define EXPAND_THRESHOLD 704
 #define BUFFER_SIZE 100000000
 #define BUFFER_OFFSET_SIZE 1000000
 #define CLIQUES_SIZE 2000000
@@ -33,8 +33,8 @@ using namespace std;
 // per warp
 #define WCLIQUES_SIZE 5000
 #define WCLIQUES_OFFSET_SIZE 500
-#define WTASKS_SIZE 500000
-#define WTASKS_OFFSET_SIZE 40000
+#define WTASKS_SIZE 40000
+#define WTASKS_OFFSET_SIZE 4000
 #define WVERTICES_SIZE 40000
 #define WADJACENCIES_SIZE 40000
 
@@ -42,12 +42,12 @@ using namespace std;
 #define VERTICES_SIZE 50
  
 // threads info
-#define BLOCK_SIZE 256
+#define BLOCK_SIZE 1024
 #define NUM_OF_BLOCKS 22
 #define WARP_SIZE 32
 
 // run settings
-#define CPU_LEVELS_x2 1
+#define CPU_LEVELS_x2 10
 
 // debug setting
 #define NUM_OF_TIMES 11
@@ -550,7 +550,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
     initialize_tasks(input_graph, host_data);
 
     // DEBUG
-    h_print_Data_Sizes(host_data, host_cliques);
+    //h_print_Data_Sizes(host_data, host_cliques);
     //print_CPU_Data(host_data);
 
     // CPU EXPANSION
@@ -564,7 +564,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
         }
 
         // DEBUG
-        h_print_Data_Sizes(host_data, host_cliques);
+        //h_print_Data_Sizes(host_data, host_cliques);
         //print_CPU_Data(host_data);
     }
 
@@ -596,7 +596,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
         // DEBUG
         //print_WClique_Buffers(dd);
         //print_WTask_Buffers(dd);
-        if (print_Warp_Data_Sizes_Every(dd, 1)) {break;}
+        //if (print_Warp_Data_Sizes_Every(dd, 1)) {break;}
         //print_All_Warp_Data_Sizes_Every(dd, 1);
 
         // consolidate all the warp tasks/cliques buffers into the next global tasks array, buffer, and cliques
@@ -619,7 +619,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
         // DEBUG
         //print_GPU_Data(dd);
         //print_GPU_Cliques(dd);
-        print_Data_Sizes_Every(dd, 1);
+        //print_Data_Sizes_Every(dd, 1);
         //print_debug(dd);
         //print_idebug(dd);
     }
@@ -3404,13 +3404,6 @@ __device__ int remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 // returns 2, if too many vertices pruned to be considered, 1 if failed found or invalid bound, 0 otherwise
 __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld) 
 {
-    // TIME 
-    clock_t stime;
-    clock_t etime;
-    if ((ld.idx % WARP_SIZE) == 0) {
-        stime = clock();
-    }
-
     int pvertexid;
     bool failed_found;
 
@@ -3441,12 +3434,7 @@ __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     }
     __syncwarp();
 
-    // TIME 
-    if ((ld.idx % WARP_SIZE) == 0) {
-        etime = clock();
-        dd.tdebug[((ld.idx / WARP_SIZE) * NUM_OF_TIMES) + 8] += (etime - stime);
-        stime = clock();
-    }
+
 
     // DIAMETER PRUNING
     diameter_pruning(dd, wd, ld, pvertexid);
@@ -3456,21 +3444,10 @@ __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
         return 1;
     }
 
-    // TIME 
-    if ((ld.idx % WARP_SIZE) == 0) {
-        etime = clock();
-        dd.tdebug[((ld.idx / WARP_SIZE) * NUM_OF_TIMES) + 9] += (etime - stime);
-        stime = clock();
-    }
+
 
     // DEGREE BASED PRUNING
     failed_found = degree_pruning_loose(dd, wd, ld);
-
-    // TIME 
-    if ((ld.idx % WARP_SIZE) == 0) {
-        etime = clock();
-        dd.tdebug[((ld.idx / WARP_SIZE) * NUM_OF_TIMES) + 10] += (etime - stime);
-    }
 
     // continue if not enough vertices after pruning
     if (wd.total_vertices[ld.warp_in_block_idx] < (*(dd.minimum_clique_size))) {
@@ -4406,23 +4383,24 @@ __device__ int device_bsearch_array(int* search_array, int array_size, int searc
     // TYPE - serial
     // SPEED - 0(log(n))
 
-    if (array_size <= 0) {
-        return -1;
+    int low = 0;
+    int high = array_size - 1;
+
+    while (low <= high) {
+        int mid = (low + high) / 2;
+
+        if (search_array[mid] == search_number) {
+            return mid;
+        }
+        else if (search_array[mid] > search_number) {
+            high = mid - 1;
+        }
+        else {
+            low = mid + 1;
+        }
     }
 
-    if (search_array[array_size / 2] == search_number) {
-        // Base case: Center element matches search number
-        return array_size / 2;
-    }
-    else if (search_array[array_size / 2] > search_number) {
-        // Recursively search lower half
-        return device_bsearch_array(search_array, array_size / 2, search_number);
-    }
-    else {
-        // Recursively search upper half
-        int upper_half_result = device_bsearch_array(search_array + array_size / 2 + 1, array_size - array_size / 2 - 1, search_number);
-        return (upper_half_result != -1) ? (array_size / 2 + 1 + upper_half_result) : -1;
-    }
+    return -1;
 }
 
 __device__ bool device_vert_isextendable(Vertex& vertex, int number_of_members, GPU_Data& dd)
