@@ -33,8 +33,8 @@ using namespace std;
 // per warp
 #define WCLIQUES_SIZE 5000
 #define WCLIQUES_OFFSET_SIZE 500
-#define WTASKS_SIZE 40000
-#define WTASKS_OFFSET_SIZE 4000
+#define WTASKS_SIZE 400000
+#define WTASKS_OFFSET_SIZE 40000
 #define WVERTICES_SIZE 40000
 #define WADJACENCIES_SIZE 40000
 
@@ -47,10 +47,7 @@ using namespace std;
 #define WARP_SIZE 32
 
 // run settings
-#define CPU_LEVELS_x2 10
-
-// debug setting
-#define NUM_OF_TIMES 11
+#define CPU_LEVELS_x2 0
 
 // VERTEX DATA
 struct Vertex
@@ -550,7 +547,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
     initialize_tasks(input_graph, host_data);
 
     // DEBUG
-    //h_print_Data_Sizes(host_data, host_cliques);
+    h_print_Data_Sizes(host_data, host_cliques);
     //print_CPU_Data(host_data);
 
     // CPU EXPANSION
@@ -564,7 +561,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
         }
 
         // DEBUG
-        //h_print_Data_Sizes(host_data, host_cliques);
+        h_print_Data_Sizes(host_data, host_cliques);
         //print_CPU_Data(host_data);
     }
 
@@ -596,7 +593,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
         // DEBUG
         //print_WClique_Buffers(dd);
         //print_WTask_Buffers(dd);
-        //if (print_Warp_Data_Sizes_Every(dd, 1)) {break;}
+        if (print_Warp_Data_Sizes_Every(dd, 1)) {break;}
         //print_All_Warp_Data_Sizes_Every(dd, 1);
 
         // consolidate all the warp tasks/cliques buffers into the next global tasks array, buffer, and cliques
@@ -619,7 +616,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
         // DEBUG
         //print_GPU_Data(dd);
         //print_GPU_Cliques(dd);
-        //print_Data_Sizes_Every(dd, 1);
+        print_Data_Sizes_Every(dd, 1);
         //print_debug(dd);
         //print_idebug(dd);
     }
