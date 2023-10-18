@@ -8,6 +8,8 @@
 #include <cstdio>
 #include <sstream>
 #include <cmath>
+#include <time.h>
+#include <sys/timeb.h>
 #include <cuda_runtime.h>
 #include <cuda.h>
 #include <device_launch_parameters.h>
@@ -33,8 +35,8 @@ using namespace std;
 // per warp
 #define WCLIQUES_SIZE 5000
 #define WCLIQUES_OFFSET_SIZE 500
-#define WTASKS_SIZE 400000
-#define WTASKS_OFFSET_SIZE 40000
+#define WTASKS_SIZE 500000
+#define WTASKS_OFFSET_SIZE 50000
 #define WVERTICES_SIZE 40000
 #define WADJACENCIES_SIZE 40000
 
@@ -4581,10 +4583,6 @@ inline void OutputOneSet(FILE* fp, int* pset, int nlen)
     fprintf(fp, "\n");
 
 }
-
-#include <stdio.h>
-#include <time.h>
-#include <sys/timeb.h>
 
 int gntotal_max_cliques;
 
