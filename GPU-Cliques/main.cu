@@ -3430,7 +3430,7 @@ __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
 
     // DEGREE BASED PRUNING
-    failed_found = degree_pruning_loose(dd, wd, ld);
+    failed_found = degree_pruning(dd, wd, ld);
 
     // continue if not enough vertices after pruning
     if (wd.total_vertices[ld.warp_in_block_idx] < (*(dd.minimum_clique_size))) {
