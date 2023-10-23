@@ -25,7 +25,7 @@ using namespace std;
 
 // global memory size: 1.500.000.000 ints
 #define TASKS_SIZE 2000000
-#define EXPAND_THRESHOLD 352
+#define EXPAND_THRESHOLD 704
 #define BUFFER_SIZE 100000000
 #define BUFFER_OFFSET_SIZE 1000000
 #define CLIQUES_SIZE 2000000
@@ -35,16 +35,16 @@ using namespace std;
 // per warp
 #define WCLIQUES_SIZE 5000
 #define WCLIQUES_OFFSET_SIZE 500
-#define WTASKS_SIZE 500000
-#define WTASKS_OFFSET_SIZE 50000
-#define WVERTICES_SIZE 40000
-#define WADJACENCIES_SIZE 40000
+#define WTASKS_SIZE 50000
+#define WTASKS_OFFSET_SIZE 5000
+#define WVERTICES_SIZE 4000
+#define WADJACENCIES_SIZE 4000
 
 // shared memory size: 12.300 ints
 #define VERTICES_SIZE 50
  
 // threads info
-#define BLOCK_SIZE 512
+#define BLOCK_SIZE 1024
 #define NUM_OF_BLOCKS 22
 #define WARP_SIZE 32
 
@@ -386,7 +386,6 @@ __device__ void check_for_clique(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
 __device__ void write_to_tasks(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
 __device__ void diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, int pvertexid);
 __device__ void update_degrees(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, int number_of_removed_candidates);
-__device__ int critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
 
 __device__ void calculate_LU_bounds(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
 __device__ void calculate_loose_LU_bounds(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
@@ -3417,7 +3416,7 @@ __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
 
     // DEGREE BASED PRUNING
-    failed_found = degree_pruning(dd, wd, ld);
+    failed_found = degree_pruning_loose(dd, wd, ld);
 
     // continue if not enough vertices after pruning
     if (wd.total_vertices[ld.warp_in_block_idx] < (*(dd.minimum_clique_size))) {
@@ -3505,45 +3504,24 @@ __device__ void diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, in
     __syncwarp();
 }
 
+// program updates degrees by : for each vertex, for each removed vertex, binary search neighbors of removed vertex for vertex
 __device__ void update_degrees(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, int number_of_removed_candidates)
 {
-    /*
-    * Program updates degrees by: for each vertex, for each removed vertex, binary search neighbors of removed vertex for (non-removed)vertex. This is an improvement from the Quick algorithm because it uses binary search.
-    * Additionally the program dynamically selects which for loop to parallelize based on which one is larger, this is the purpose of the if statement.
-    */
-
     int pvertexid;
 
-    if (wd.total_vertices[ld.warp_in_block_idx] - number_of_removed_candidates > number_of_removed_candidates) {
-        for (int k = (ld.idx % WARP_SIZE); k < wd.total_vertices[ld.warp_in_block_idx] - number_of_removed_candidates; k += WARP_SIZE) {
-            pvertexid = ld.vertices[k].vertexid;
-            for (int l = wd.total_vertices[ld.warp_in_block_idx] - number_of_removed_candidates; l < wd.total_vertices[ld.warp_in_block_idx]; l++) {
-                if (device_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[ld.vertices[l].vertexid], dd.onehop_offsets[ld.vertices[l].vertexid + 1] - dd.onehop_offsets[ld.vertices[l].vertexid], pvertexid) != -1) {
-                    ld.vertices[k].exdeg--;
-                }
+    for (int k = (ld.idx % WARP_SIZE); k < wd.total_vertices[ld.warp_in_block_idx] - number_of_removed_candidates; k += WARP_SIZE) {
+        pvertexid = ld.vertices[k].vertexid;
+        for (int l = wd.total_vertices[ld.warp_in_block_idx] - number_of_removed_candidates; l < wd.total_vertices[ld.warp_in_block_idx]; l++) {
+            if (device_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[ld.vertices[l].vertexid], dd.onehop_offsets[ld.vertices[l].vertexid + 1] - dd.onehop_offsets[ld.vertices[l].vertexid], pvertexid) != -1) {
+                ld.vertices[k].exdeg--;
+            }
 
-                if (device_bsearch_array(dd.twohop_neighbors + dd.twohop_offsets[ld.vertices[l].vertexid], dd.twohop_offsets[ld.vertices[l].vertexid + 1] - dd.twohop_offsets[ld.vertices[l].vertexid], pvertexid) != -1) {
-                    ld.vertices[k].lvl2adj--;
-                }
+            if (device_bsearch_array(dd.twohop_neighbors + dd.twohop_offsets[ld.vertices[l].vertexid], dd.twohop_offsets[ld.vertices[l].vertexid + 1] - dd.twohop_offsets[ld.vertices[l].vertexid], pvertexid) != -1) {
+                ld.vertices[k].lvl2adj--;
             }
         }
-        __syncwarp();
     }
-    else {
-        for (int k = 0; k < wd.total_vertices[ld.warp_in_block_idx] - number_of_removed_candidates; k++) {
-            pvertexid = ld.vertices[k].vertexid;
-            for (int l = wd.total_vertices[ld.warp_in_block_idx] - number_of_removed_candidates + (ld.idx % WARP_SIZE); l < wd.total_vertices[ld.warp_in_block_idx]; l += WARP_SIZE) {
-                if (device_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[ld.vertices[l].vertexid], dd.onehop_offsets[ld.vertices[l].vertexid + 1] - dd.onehop_offsets[ld.vertices[l].vertexid], pvertexid) != -1) {
-                    ld.vertices[k].exdeg--;
-                }
-
-                if (device_bsearch_array(dd.twohop_neighbors + dd.twohop_offsets[ld.vertices[l].vertexid], dd.twohop_offsets[ld.vertices[l].vertexid + 1] - dd.twohop_offsets[ld.vertices[l].vertexid], pvertexid) != -1) {
-                    ld.vertices[k].lvl2adj--;
-                }
-            }
-            __syncwarp();
-        }
-    }
+    __syncwarp();
 }
 
 
