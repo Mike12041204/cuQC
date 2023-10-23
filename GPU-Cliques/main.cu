@@ -25,7 +25,7 @@ using namespace std;
 
 // global memory size: 1.500.000.000 ints
 #define TASKS_SIZE 2000000
-#define EXPAND_THRESHOLD 704
+#define EXPAND_THRESHOLD 528
 #define BUFFER_SIZE 100000000
 #define BUFFER_OFFSET_SIZE 1000000
 #define CLIQUES_SIZE 2000000
@@ -44,7 +44,7 @@ using namespace std;
 #define VERTICES_SIZE 50
  
 // threads info
-#define BLOCK_SIZE 1024
+#define BLOCK_SIZE 768
 #define NUM_OF_BLOCKS 22
 #define WARP_SIZE 32
 
@@ -408,6 +408,7 @@ __device__ int device_get_mindeg(int number_of_members, GPU_Data& dd);
 
 
 // TODO GENERALLY
+//  - local memory usage is right around 100% cant enable exact LU pruning while being able to use all threads
 //  - profile to see why the program is so slow
 //  - test program on larger graphs
 
@@ -3416,7 +3417,7 @@ __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
 
     // DEGREE BASED PRUNING
-    failed_found = degree_pruning_loose(dd, wd, ld);
+    failed_found = degree_pruning(dd, wd, ld);
 
     // continue if not enough vertices after pruning
     if (wd.total_vertices[ld.warp_in_block_idx] < (*(dd.minimum_clique_size))) {
