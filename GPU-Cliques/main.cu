@@ -408,44 +408,32 @@ __device__ int device_get_mindeg(int number_of_members, GPU_Data& dd);
 
 
 
-// !!!!!record times of all methods to see which one is the longest!!!!!
-// see if it can run quickly on the gpu without some pruning methods
-// TODO - record times or use profiler ot find time bottleneck in gpu kernel
-
-// 1 - criticial vertex on gpu
-// 2 - level 0 pruning
-// 3 - cpu hybrid dfs-bfs expansion
-// 4 - cover pruning on cpu
-
 // TODO GENERALLY
-// TODO - test program on larger graphs
-// TODO - increase thread usage by monitoring and improving memory usage, consult gpu videos
+//  - profile to see why the program is so slow
+//  - test program on larger graphs
 
-// TODO NOW (HIGH PRIORITY)
-// TODO - optimize code on CPU with improvements made on the GPU code
-// TODO - optimize cpu sort_vertices method like gpu
-// TODO - fill tasks kernel does not always need to launch can check outside of kernel to determine so
-// TODO - combine add one vertex into the copying from tasks
-// TODO - remove adjacencies in shared memory
+// TODO (HIGH PRIORITY)
+//  - optimize code on CPU with improvements made on the GPU code
+//  - optimize cpu sort_vertices method like gpu
+//  - fill tasks kernel does not always need to launch can check outside of kernel to determine so
+//  - combine add one vertex into the copying from tasks
+//  - remove adjacencies in shared memory
+//  - criticial vertex on gpu
+//  - improve intersection by comparing to CuTS intersection strategies
+//  - improve host critical vertex pruning like gpu version
 
-// TODO EVENTUALLY (LOW PRIORITY)
-// TODO - reevaluate and change where uint64_t's are used
-// TODO - optimize for loops to have simpler conditional and maybe no index if possible
-// TODO - store cpu data in concise manner like gpu data
-// TODO - look at how Quick constructs graph and other things for optimization tricks
-// TODO - label for vertices can be a byte rather than int
-// TODO - change gpu lower-upper bound and min_ext_deg to be lower case
-// TODO - make consistent method names for cpu and gpu h vs d
-// TODO - optimize gpu sort methods
-
-// IMPORTANT - lets call our current traversal stragetgy "wide-dfs", we should consider starting the cpu in bfs, say the first 3 levels then go back to the wide-dfs, would allow the extra pruning of the cpu to apply to all
-//             branches of the expansion tree equally, it would "nip the expansion tree in the bud"
-// 
-//             Proposed New Strategy - BFS CPU -> wide-DFS CPU -> wide-DFS GPU
-//             Hybrid DFS/BFS, Hybrid CPU/GPU
-// 
-//             Logic - heavily prune lower levels on the cpu where pruning is most effective, continue expansion on the cpu normally until growth tapers out, trnasfer to gpu to when memory usage is slow to take advntage of 
-//                     parrallel processing power
+// TODO (LOW PRIORITY)
+//  - reevaluate and change where uint64_t's are used
+//  - optimize for loops to have simpler conditional and maybe no index if possible
+//  - store cpu data in concise manner like gpu data
+//  - look at how Quick constructs graph and other things for optimization tricks
+//  - label for vertices can be a byte rather than int
+//  - change gpu lower-upper bound and min_ext_deg to be lower case
+//  - make consistent method names for cpu and gpu h vs d
+//  - optimize gpu sort methods
+//  - level 0 pruning
+//  - cpu hybrid dfs-bfs expansion
+//  - cover pruning on cpu
 
 
 
@@ -1804,7 +1792,6 @@ void h_check_for_clique(CPU_Cliques& host_cliques, Vertex* new_vertices, int num
     }
 }
 
-// TODO - improve like gpu version
 // returns 2 if too many vertices pruned or a critical vertex fail, returns 1 if failed found or invalid bounds, else 0
 int h_critical_vertex_pruning(CPU_Graph& graph, Vertex* new_vertices, int& total_new_vertices, int& number_of_new_candidates, int& number_of_new_vertices, int& upper_bound, int& lower_bound, int& minimum_external_degree)
 {
