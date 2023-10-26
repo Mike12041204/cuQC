@@ -41,7 +41,7 @@ using namespace std;
 #define WADJACENCIES_SIZE 4000
 
 // shared memory size: 12.300 ints
-#define VERTICES_SIZE 50
+#define VERTICES_SIZE 75
  
 // threads info
 #define BLOCK_SIZE 768
@@ -232,8 +232,9 @@ struct GPU_Data
     uint64_t* wtasks_offset;
     Vertex* wtasks_vertices;
 
-    Vertex* wvertices;
-    int* wadjacencies;
+    Vertex* global_vertices;
+    int* adjacencies;
+    int* vertex_order_map;
 
     int* total_tasks;
 
@@ -289,7 +290,6 @@ struct Warp_Data
     int total_vertices[(BLOCK_SIZE / WARP_SIZE)];
 
     Vertex shared_vertices[VERTICES_SIZE * (BLOCK_SIZE / WARP_SIZE)];
-    int shared_adjacencies[VERTICES_SIZE * (BLOCK_SIZE / WARP_SIZE)];
 
     int min_ext_deg[(BLOCK_SIZE / WARP_SIZE)];
     int lower_bound[(BLOCK_SIZE / WARP_SIZE)];
@@ -314,7 +314,6 @@ struct Local_Data
     uint64_t* read_count;
 
     Vertex* vertices;
-    int* adjacencies;
 
     int idx;
     int wib_idx;
@@ -700,10 +699,11 @@ void allocate_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_clique
     chkerr(cudaMemset(dd.wtasks_offset, 0, (sizeof(uint64_t) * WTASKS_OFFSET_SIZE) * number_of_warps));
     chkerr(cudaMemset(dd.wtasks_count, 0, sizeof(uint64_t) * number_of_warps));
 
-    chkerr(cudaMalloc((void**)&dd.wvertices, (sizeof(Vertex) * WVERTICES_SIZE) * number_of_warps));
-    chkerr(cudaMalloc((void**)&dd.wadjacencies, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
+    chkerr(cudaMalloc((void**)&dd.global_vertices, (sizeof(Vertex) * WVERTICES_SIZE) * number_of_warps));
+    chkerr(cudaMalloc((void**)&dd.adjacencies, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
+    chkerr(cudaMalloc((void**)&dd.vertex_order_map, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
 
-    chkerr(cudaMemset(dd.wadjacencies, 0, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
+    chkerr(cudaMemset(dd.adjacencies, 0, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
 
     chkerr(cudaMalloc((void**)&dd.maximal_expansion, sizeof(bool)));
     chkerr(cudaMalloc((void**)&dd.dumping_cliques, sizeof(bool)));
@@ -977,8 +977,8 @@ void free_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_cliques)
     chkerr(cudaFree(dd.wtasks_offset));
     chkerr(cudaFree(dd.wtasks_vertices));
 
-    chkerr(cudaFree(dd.wvertices));
-    chkerr(cudaFree(dd.wadjacencies));
+    chkerr(cudaFree(dd.global_vertices));
+    chkerr(cudaFree(dd.adjacencies));
 
     chkerr(cudaFree(dd.maximal_expansion));
     chkerr(cudaFree(dd.dumping_cliques));
@@ -1258,6 +1258,7 @@ bool h_remove_one_vertex(CPU_Graph& graph, CPU_Data& host_data, Vertex* read_ver
         return 1;
     }
 
+    // TODO - change vert is extendable to Quick check using mindeg
     mindeg = get_mindeg(num_mem);
 
     // remove one vertex
@@ -1287,10 +1288,10 @@ bool h_remove_one_vertex(CPU_Graph& graph, CPU_Data& host_data, Vertex* read_ver
     }
 
     if (!failed_found) {
-        pneighbors_end = graph.twohop_offsets[pvertexid];
-        pneighbors_start = graph.twohop_offsets[pvertexid + 1];
+        pneighbors_start = graph.twohop_offsets[pvertexid];
+        pneighbors_end = graph.twohop_offsets[pvertexid + 1];
         for (int i = pneighbors_start; i < pneighbors_end; i++) {
-            phelper1 = host_data.vertex_order_map[graph.onehop_neighbors[i]];
+            phelper1 = host_data.vertex_order_map[graph.twohop_neighbors[i]];
 
             if (phelper1 > -1) {
                 read_vertices[start + phelper1].lvl2adj--;
@@ -2897,15 +2898,8 @@ __global__ void expand_level(GPU_Data dd)
             // select whether to store vertices in global or shared memory based on size
             if (wd.total_vertices[ld.wib_idx] <= VERTICES_SIZE) {
                 ld.vertices = wd.shared_vertices + (VERTICES_SIZE * ld.wib_idx);
-                ld.adjacencies = wd.shared_adjacencies + (VERTICES_SIZE * ld.wib_idx);
-
-                // intialize adjacencies array to all zeros for critical vertex pruning later
-                for (int k = (ld.idx % WARP_SIZE); k < wd.total_vertices[ld.wib_idx]; k += WARP_SIZE) {
-                    ld.adjacencies[k] = 0;
-                }
             } else {
-                ld.vertices = dd.wvertices + (WVERTICES_SIZE * (ld.idx / WARP_SIZE));
-                ld.adjacencies = dd.wadjacencies + (WVERTICES_SIZE * (ld.idx / WARP_SIZE));
+                ld.vertices = dd.global_vertices + (WVERTICES_SIZE * (ld.idx / WARP_SIZE));
             }
 
             for (int k = (ld.idx % WARP_SIZE); k < wd.total_vertices[ld.wib_idx]; k += WARP_SIZE) {
@@ -3176,6 +3170,7 @@ __device__ int lookahead_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 __device__ int remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld) 
 {
     int pvertexid;
+    int phelper1;
     bool failed_found;
 
     if (wd.tot_vert[ld.wib_idx] - 1 < (*dd.minimum_clique_size)) {
@@ -3189,29 +3184,45 @@ __device__ int remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     }
     __syncwarp();
 
-    // get the id of the removed vertex and update the degrees of its adjacencies
-    pvertexid = ld.read_vertices[wd.start[ld.wib_idx] + wd.tot_vert[ld.wib_idx]].vertexid;
-    for (int k = (ld.idx % WARP_SIZE); k < wd.tot_vert[ld.wib_idx]; k += WARP_SIZE) {
-        if (device_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[pvertexid], dd.onehop_offsets[pvertexid + 1] - dd.onehop_offsets[pvertexid], ld.read_vertices[wd.start[ld.wib_idx] + k].vertexid) != -1) {
-            ld.read_vertices[wd.start[ld.wib_idx] + k].exdeg--;
-        }
+    // initialize vertex order map
+    for (int i = (ld.idx % WARP_SIZE); i < wd.tot_vert[ld.wib_idx]; i += WARP_SIZE) {
+        dd.vertex_order_map[ld.read_vertices[wd.start[ld.wib_idx] + i].vertexid] = i;
+    }
+    __syncwarp();
 
-        if (device_bsearch_array(dd.twohop_neighbors + dd.twohop_offsets[pvertexid], dd.twohop_offsets[pvertexid + 1] - dd.twohop_offsets[pvertexid], ld.read_vertices[wd.start[ld.wib_idx] + k].vertexid) != -1) {
-            ld.read_vertices[wd.start[ld.wib_idx] + k].lvl2adj--;
+    // update info of vertices connected to removed cand
+    pvertexid = ld.read_vertices[wd.start[ld.wib_idx] + wd.tot_vert[ld.wib_idx]].vertexid;
+
+    for (int i = (ld.idx % WARP_SIZE); i < dd.onehop_offsets[pvertexid + 1] - dd.onehop_offsets[pvertexid]; i += WARP_SIZE) {
+        phelper1 = dd.vertex_order_map[dd.onehop_neighbors[dd.onehop_offsets[pvertexid] + i]];
+
+        if (phelper1 > -1) {
+            ld.read_vertices[wd.start[ld.wib_idx] + phelper1].exdeg--;
+
+            if (phelper1 < wd.num_mem[ld.wib_idx] && !device_vert_isextendable(ld.read_vertices[wd.start[ld.wib_idx] + phelper1], wd.num_mem[ld.wib_idx], dd)) {
+                failed_found = true;
+                break;
+            }
+        }
+    }
+    failed_found = __any_sync(0xFFFFFFFF, failed_found);
+
+    if (!failed_found) {
+        for (int i = (ld.idx % WARP_SIZE); i < dd.twohop_offsets[pvertexid + 1] - dd.twohop_offsets[pvertexid]; i += WARP_SIZE) {
+            phelper1 = dd.vertex_order_map[dd.twohop_neighbors[dd.twohop_offsets[pvertexid] + i]];
+
+            if (phelper1 > -1) {
+                ld.read_vertices[wd.start[ld.wib_idx] + phelper1].lvl2adj--;
+            }
         }
     }
     __syncwarp();
 
-    // check for failed vertices
-    failed_found = false;
-    for (int k = (ld.idx % WARP_SIZE); k < wd.num_mem[ld.wib_idx]; k += WARP_SIZE) {
-        if (!device_vert_isextendable(ld.read_vertices[wd.start[ld.wib_idx] + k], wd.num_mem[ld.wib_idx], dd)) {
-            failed_found = true;
-            break;
-        }
-
+    // initialize vertex order map
+    for (int i = (ld.idx % WARP_SIZE); i < wd.tot_vert[ld.wib_idx]; i += WARP_SIZE) {
+        dd.vertex_order_map[ld.read_vertices[wd.start[ld.wib_idx] + i].vertexid] = -1;
     }
-    failed_found = __any_sync(0xFFFFFFFF, failed_found);
+    __syncwarp();
 
     if (failed_found) {
         return 1;
