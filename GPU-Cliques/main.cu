@@ -416,7 +416,6 @@ __device__ int device_get_mindeg(int number_of_members, GPU_Data& dd);
 
 // TODO GENERALLY
 //  - local memory usage is right around 100% cant enable exact LU pruning while being able to use all threads
-//  - profile to see why the program is so slow
 //  - test program on larger graphs
 
 // TODO (HIGH PRIORITY)
@@ -425,7 +424,7 @@ __device__ int device_get_mindeg(int number_of_members, GPU_Data& dd);
 //  - fill tasks kernel does not always need to launch can check outside of kernel to determine so
 //  - combine add one vertex into the copying from tasks
 //  - remove adjacencies in shared memory
-//  - criticial vertex on gpu
+//  - critical vertex on gpu
 //  - improve host critical vertex pruning like gpu version
 
 // TODO (LOW PRIORITY)
