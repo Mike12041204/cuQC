@@ -3170,66 +3170,113 @@ __device__ int lookahead_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 // returns 1 if failed found after removing, 0 otherwise
 __device__ int remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld) 
 {
-    int pvertexid;
-    int phelper1;
-    bool failed_found;
+    if (false) {
+        int pvertexid;
+        int phelper1;
+        bool failed_found;
 
-    if (wd.tot_vert[ld.wib_idx] - 1 < (*dd.minimum_clique_size)) {
-        return 1;
+        if (wd.tot_vert[ld.wib_idx] - 1 < (*dd.minimum_clique_size)) {
+            return 1;
+        }
+
+        // remove the last candidate in vertices
+        if ((ld.idx % WARP_SIZE) == 0) {
+            wd.num_cand[ld.wib_idx]--;
+            wd.tot_vert[ld.wib_idx]--;
+        }
+        __syncwarp();
+
+        // initialize vertex order map
+        for (int i = (ld.idx % WARP_SIZE); i < wd.tot_vert[ld.wib_idx]; i += WARP_SIZE) {
+            dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + ld.read_vertices[wd.start[ld.wib_idx] + i].vertexid] = i;
+        }
+        __syncwarp();
+
+        // update info of vertices connected to removed cand
+        pvertexid = ld.read_vertices[wd.start[ld.wib_idx] + wd.tot_vert[ld.wib_idx]].vertexid;
+
+        for (int i = dd.onehop_offsets[pvertexid] + (ld.idx % WARP_SIZE); i < dd.onehop_offsets[pvertexid + 1]; i += WARP_SIZE) {
+            phelper1 = dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + dd.onehop_neighbors[i]];
+
+            if (phelper1 > -1) {
+                ld.read_vertices[wd.start[ld.wib_idx] + phelper1].exdeg--;
+
+                if (phelper1 < wd.num_mem[ld.wib_idx] && !device_vert_isextendable(ld.read_vertices[wd.start[ld.wib_idx] + phelper1], wd.num_mem[ld.wib_idx], dd)) {
+                    failed_found = true;
+                    break;
+                }
+            }
+        }
+        failed_found = __any_sync(0xFFFFFFFF, failed_found);
+
+        if (!failed_found) {
+            for (int i = dd.twohop_offsets[pvertexid] + (ld.idx % WARP_SIZE); i < dd.twohop_offsets[pvertexid + 1]; i += WARP_SIZE) {
+                phelper1 = dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + dd.twohop_neighbors[i]];
+
+                if (phelper1 > -1) {
+                    ld.read_vertices[wd.start[ld.wib_idx] + phelper1].lvl2adj--;
+                }
+            }
+        }
+        __syncwarp();
+
+        // initialize vertex order map
+        for (int i = (ld.idx % WARP_SIZE); i < wd.tot_vert[ld.wib_idx]; i += WARP_SIZE) {
+            dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + ld.read_vertices[wd.start[ld.wib_idx] + i].vertexid] = -1;
+        }
+        __syncwarp();
+
+        if (failed_found) {
+            return 1;
+        }
+
+        return 0;
     }
+    else {
+        int pvertexid;
+        bool failed_found;
 
-    // remove the last candidate in vertices
-    if ((ld.idx % WARP_SIZE) == 0) {
-        wd.num_cand[ld.wib_idx]--;
-        wd.tot_vert[ld.wib_idx]--;
-    }
-    __syncwarp();
+        if (wd.tot_vert[ld.wib_idx] - 1 < (*dd.minimum_clique_size)) {
+            return 1;
+        }
 
-    // initialize vertex order map
-    for (int i = (ld.idx % WARP_SIZE); i < wd.tot_vert[ld.wib_idx]; i += WARP_SIZE) {
-        dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + ld.read_vertices[wd.start[ld.wib_idx] + i].vertexid] = i;
-    }
-    __syncwarp();
+        // remove the last candidate in vertices
+        if ((ld.idx % WARP_SIZE) == 0) {
+            wd.num_cand[ld.wib_idx]--;
+            wd.tot_vert[ld.wib_idx]--;
+        }
+        __syncwarp();
 
-    // update info of vertices connected to removed cand
-    pvertexid = ld.read_vertices[wd.start[ld.wib_idx] + wd.tot_vert[ld.wib_idx]].vertexid;
+        // get the id of the removed vertex and update the degrees of its adjacencies
+        pvertexid = ld.read_vertices[wd.start[ld.wib_idx] + wd.tot_vert[ld.wib_idx]].vertexid;
+        for (int k = (ld.idx % WARP_SIZE); k < wd.tot_vert[ld.wib_idx]; k += WARP_SIZE) {
+            if (device_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[pvertexid], dd.onehop_offsets[pvertexid + 1] - dd.onehop_offsets[pvertexid], ld.read_vertices[wd.start[ld.wib_idx] + k].vertexid) != -1) {
+                ld.read_vertices[wd.start[ld.wib_idx] + k].exdeg--;
+            }
 
-    for (int i = dd.onehop_offsets[pvertexid] + (ld.idx % WARP_SIZE); i < dd.onehop_offsets[pvertexid + 1]; i += WARP_SIZE) {
-        phelper1 = dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + dd.onehop_neighbors[i]];
+            if (device_bsearch_array(dd.twohop_neighbors + dd.twohop_offsets[pvertexid], dd.twohop_offsets[pvertexid + 1] - dd.twohop_offsets[pvertexid], ld.read_vertices[wd.start[ld.wib_idx] + k].vertexid) != -1) {
+                ld.read_vertices[wd.start[ld.wib_idx] + k].lvl2adj--;
+            }
+        }
+        __syncwarp();
 
-        if (phelper1 > -1) {
-            ld.read_vertices[wd.start[ld.wib_idx] + phelper1].exdeg--;
-
-            if (phelper1 < wd.num_mem[ld.wib_idx] && !device_vert_isextendable(ld.read_vertices[wd.start[ld.wib_idx] + phelper1], wd.num_mem[ld.wib_idx], dd)) {
+        // check for failed vertices
+        failed_found = false;
+        for (int k = (ld.idx % WARP_SIZE); k < wd.num_mem[ld.wib_idx]; k += WARP_SIZE) {
+            if (!device_vert_isextendable(ld.read_vertices[wd.start[ld.wib_idx] + k], wd.num_mem[ld.wib_idx], dd)) {
                 failed_found = true;
                 break;
             }
+
         }
-    }
-    failed_found = __any_sync(0xFFFFFFFF, failed_found);
+        failed_found = __any_sync(0xFFFFFFFF, failed_found);
 
-    if (!failed_found) {
-        for (int i = dd.twohop_offsets[pvertexid] + (ld.idx % WARP_SIZE); i < dd.twohop_offsets[pvertexid + 1]; i += WARP_SIZE) {
-            phelper1 = dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + dd.twohop_neighbors[i]];
-
-            if (phelper1 > -1) {
-                ld.read_vertices[wd.start[ld.wib_idx] + phelper1].lvl2adj--;
-            }
+        if (failed_found) {
+            return 1;
         }
-    }
-    __syncwarp();
 
-    // initialize vertex order map
-    for (int i = (ld.idx % WARP_SIZE); i < wd.tot_vert[ld.wib_idx]; i += WARP_SIZE) {
-        dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + ld.read_vertices[wd.start[ld.wib_idx] + i].vertexid] = -1;
+        return 0;
     }
-    __syncwarp();
-
-    if (failed_found) {
-        return 1;
-    }
-
-    return 0;
 }
 
 // when pruning each lane writes to its remaining or removed and increment count, then scan to get warp removed remaining write position then writes
