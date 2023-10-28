@@ -25,7 +25,7 @@ using namespace std;
 
 // global memory size: 1.500.000.000 ints
 #define TASKS_SIZE 2000000
-#define EXPAND_THRESHOLD 528
+#define EXPAND_THRESHOLD 352
 #define BUFFER_SIZE 100000000
 #define BUFFER_OFFSET_SIZE 1000000
 #define CLIQUES_SIZE 2000000
@@ -44,7 +44,7 @@ using namespace std;
 #define VERTICES_SIZE 75
  
 // threads info
-#define BLOCK_SIZE 768
+#define BLOCK_SIZE 512
 #define NUM_OF_BLOCKS 22
 #define WARP_SIZE 32
 
@@ -3170,7 +3170,7 @@ __device__ int lookahead_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 // returns 1 if failed found after removing, 0 otherwise
 __device__ int remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld) 
 {
-    if (false) {
+    if (true) {
         int pvertexid;
         int phelper1;
         bool failed_found;
@@ -3191,6 +3191,14 @@ __device__ int remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
             dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + ld.read_vertices[wd.start[ld.wib_idx] + i].vertexid] = i;
         }
         __syncwarp();
+
+        if (ld.idx == 0) {
+            printf("::: \n");
+            for (int i = 0; i < WVERTICES_SIZE; i++) {
+                printf("%i ", dd.vertex_order_map[i]);
+            }
+            printf(" :::\n");
+        }
 
         // update info of vertices connected to removed cand
         pvertexid = ld.read_vertices[wd.start[ld.wib_idx] + wd.tot_vert[ld.wib_idx]].vertexid;
@@ -3217,10 +3225,10 @@ __device__ int remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
                     ld.read_vertices[wd.start[ld.wib_idx] + phelper1].lvl2adj--;
                 }
             }
+            __syncwarp();
         }
-        __syncwarp();
 
-        // initialize vertex order map
+        // reset vertex order map
         for (int i = (ld.idx % WARP_SIZE); i < wd.tot_vert[ld.wib_idx]; i += WARP_SIZE) {
             dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + ld.read_vertices[wd.start[ld.wib_idx] + i].vertexid] = -1;
         }
