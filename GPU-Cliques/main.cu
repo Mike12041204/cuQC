@@ -49,7 +49,7 @@ using namespace std;
 #define WARP_SIZE 32
 
 // run settings
-#define CPU_LEVELS_x2 15
+#define CPU_LEVELS_x2 0
 
 // VERTEX DATA
 struct Vertex
@@ -547,7 +547,8 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
 
     // CPU EXPANSION
     // cpu levels is multiplied by two to ensure that data ends up in tasks1, this allows us to always copy tasks1 without worry like before hybrid cpu approach
-    for (int i = 0; i < 2 * CPU_LEVELS_x2 && !(*host_data.maximal_expansion); i++) {
+    // cpu expand must be called atleast one time to handle first round cover pruning as the gpu code cannot do this
+    for (int i = 0; i < 2 * (CPU_LEVELS_x2 + 1) && !(*host_data.maximal_expansion); i++) {
         h_expand_level(input_graph, host_data, host_cliques);
     
         // if cliques is more than half full, flush to file
@@ -557,7 +558,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
 
         // DEBUG
         h_print_Data_Sizes(host_data, host_cliques);
-        //print_CPU_Data(host_data);
+        print_CPU_Data(host_data);
     }
 
     flush_cliques(host_cliques, temp_results);
@@ -716,7 +717,7 @@ void allocate_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_clique
     chkerr(cudaMalloc((void**)&dd.vertex_order_map, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
 
     chkerr(cudaMemset(dd.adjacencies, 0, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
-    chkerr(cudaMemset(dd.adjacencies, -1, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
+    chkerr(cudaMemset(dd.vertex_order_map, -1, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
 
     chkerr(cudaMalloc((void**)&dd.maximal_expansion, sizeof(bool)));
     chkerr(cudaMalloc((void**)&dd.dumping_cliques, sizeof(bool)));
@@ -3194,7 +3195,7 @@ __device__ int remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     pvertexid = ld.read_vertices[wd.start[ld.wib_idx] + wd.tot_vert[ld.wib_idx]].vertexid;
 
     for (int i = dd.onehop_offsets[pvertexid] + (ld.idx % WARP_SIZE); i < dd.onehop_offsets[pvertexid + 1]; i += WARP_SIZE) {
-        phelper1 = dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + dd.onehop_neighbors[dd.onehop_neighbors[i]]];
+        phelper1 = dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + dd.onehop_neighbors[i]];
 
         if (phelper1 > -1) {
             ld.read_vertices[wd.start[ld.wib_idx] + phelper1].exdeg--;
@@ -3209,7 +3210,7 @@ __device__ int remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
     if (!failed_found) {
         for (int i = dd.twohop_offsets[pvertexid] + (ld.idx % WARP_SIZE); i < dd.twohop_offsets[pvertexid + 1]; i += WARP_SIZE) {
-            phelper1 = dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + dd.twohop_neighbors[dd.twohop_neighbors[i]]];
+            phelper1 = dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + dd.twohop_neighbors[i]];
 
             if (phelper1 > -1) {
                 ld.read_vertices[wd.start[ld.wib_idx] + phelper1].lvl2adj--;
