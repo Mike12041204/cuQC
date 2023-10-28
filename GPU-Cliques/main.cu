@@ -424,7 +424,6 @@ __device__ int d_get_mindeg(int number_of_members, GPU_Data& dd);
 //  - optimize code on CPU with improvements made on the GPU code
 //  - optimize cpu sort_vertices method like gpu
 //  - fill tasks kernel does not always need to launch can check outside of kernel to determine so
-//  - combine add one vertex into the copying from tasks
 //  - critical vertex on gpu
 //  - improve host critical vertex pruning like gpu version
 
@@ -1336,8 +1335,9 @@ int h_add_one_vertex(CPU_Graph& hg, CPU_Data& host_data, Vertex* vertices, int& 
 
 
     // ADD ONE VERTEX
-    vertices[number_of_members].label = 1;
     pvertexid = vertices[number_of_members].vertexid;
+
+    vertices[number_of_members].label = 1;
     number_of_members++;
     number_of_candidates--;
 
