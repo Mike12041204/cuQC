@@ -49,7 +49,7 @@ using namespace std;
 #define WARP_SIZE 32
 
 // run settings
-#define CPU_LEVELS_x2 10000
+#define CPU_LEVELS_x2 15
 
 // VERTEX DATA
 struct Vertex
@@ -200,6 +200,10 @@ struct CPU_Data
     bool* dumping_cliques;
 
     int* vertex_order_map;
+    int* remaining_candidates;
+    int* removed_candidates;
+    int* remaining_count;
+    int* removed_count;
 };
 
 // CPU CLIQUES
@@ -331,9 +335,9 @@ void free_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_cliques);
 void RemoveNonMax(char* szset_filename, char* szoutput_filename);
 
 void h_expand_level(CPU_Graph& graph, CPU_Data& host_data, CPU_Cliques& host_cliques);
-bool h_lookahead_pruning(CPU_Cliques& host_cliques, Vertex* read_vertices, int total_vertices, uint64_t start);
-bool h_remove_one_vertex(CPU_Graph& graph, CPU_Data& host_data, Vertex* read_vertices, int& total_vertices, int& number_of_candidates, int& number_of_vertices, uint64_t start);
-bool h_add_one_vertex(CPU_Graph& graph, CPU_Data& host_data, Vertex* vertices, int& total_vertices, int& number_of_candidates, int& number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg);
+int h_lookahead_pruning(CPU_Cliques& host_cliques, Vertex* read_vertices, int total_vertices, uint64_t start);
+int h_remove_one_vertex(CPU_Graph& graph, CPU_Data& host_data, Vertex* read_vertices, int& total_vertices, int& number_of_candidates, int& number_of_vertices, uint64_t start);
+int h_add_one_vertex(CPU_Graph& graph, CPU_Data& host_data, Vertex* vertices, int& total_vertices, int& number_of_candidates, int& number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg);
 void h_diameter_pruning(CPU_Graph& graph, Vertex* vertices, int pvertexid, int& total_vertices, int& number_of_candidates, int number_of_members);
 bool h_degree_pruning(CPU_Graph& graph, Vertex* vertices, int& total_vertices, int& number_of_candidates, int number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg);
 bool h_calculate_LU_bounds(int& upper_bound, int& lower_bound, int& min_ext_deg, Vertex* vertices, int number_of_members, int number_of_candidates);
@@ -409,6 +413,10 @@ __device__ int device_get_mindeg(int number_of_members, GPU_Data& dd);
 // vertex order map on gpu
 // cv pruning on gpu
 
+// debug update degrees on cpu
+// implement fully on cpu
+// implment on gpu
+
 // TODO GENERALLY
 //  - local memory usage is right around 100% cant enable exact LU pruning while being able to use all threads
 //  - test program on larger graphs
@@ -418,7 +426,6 @@ __device__ int device_get_mindeg(int number_of_members, GPU_Data& dd);
 //  - optimize cpu sort_vertices method like gpu
 //  - fill tasks kernel does not always need to launch can check outside of kernel to determine so
 //  - combine add one vertex into the copying from tasks
-//  - remove adjacencies in shared memory
 //  - critical vertex on gpu
 //  - improve host critical vertex pruning like gpu version
 
@@ -666,6 +673,11 @@ void allocate_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_clique
     (*host_data.dumping_cliques) = false;
 
     host_data.vertex_order_map = new int[input_graph.number_of_vertices];
+    host_data.remaining_candidates = new int[input_graph.number_of_vertices];
+    host_data.removed_candidates = new int[input_graph.number_of_vertices];
+    host_data.remaining_count = new int;
+    host_data.removed_count = new int;
+
     memset(host_data.vertex_order_map, -1, sizeof(int) * input_graph.number_of_vertices);
 
     // GPU DATA
@@ -704,6 +716,7 @@ void allocate_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_clique
     chkerr(cudaMalloc((void**)&dd.vertex_order_map, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
 
     chkerr(cudaMemset(dd.adjacencies, 0, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
+    chkerr(cudaMemset(dd.adjacencies, -1, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
 
     chkerr(cudaMalloc((void**)&dd.maximal_expansion, sizeof(bool)));
     chkerr(cudaMalloc((void**)&dd.dumping_cliques, sizeof(bool)));
@@ -1015,7 +1028,7 @@ void free_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_cliques)
 
 
 
-// --- CPU EXPANSION METHODS ---
+// --- HOST EXPANSION METHODS ---
 
 void h_expand_level(CPU_Graph& graph, CPU_Data& host_data, CPU_Cliques& host_cliques)
 {
@@ -1048,6 +1061,7 @@ void h_expand_level(CPU_Graph& graph, CPU_Data& host_data, CPU_Cliques& host_cli
     int upper_bound;
 
     int method_return;
+    int index;
 
 
 
@@ -1129,22 +1143,19 @@ void h_expand_level(CPU_Graph& graph, CPU_Data& host_data, CPU_Cliques& host_cli
             number_of_members = num_mem;
             number_of_candidates = num_cand;
             total_vertices = tot_vert;
-            for (int k = 0; k < total_vertices; k++) {
-                vertices[k].vertexid = read_vertices[start + k].vertexid;
-                vertices[k].label = read_vertices[start + k].label;
-                vertices[k].indeg = read_vertices[start + k].indeg;
-                vertices[k].exdeg = read_vertices[start + k].exdeg;
-                vertices[k].lvl2adj = read_vertices[start + k].lvl2adj;
+            for (index = 0; index < number_of_members; index++) {
+                vertices[index] = read_vertices[start + index];
+            }
+            vertices[number_of_members] = read_vertices[start + total_vertices - 1];
+            for ( ; index < total_vertices - 1; index++) {
+                vertices[index + 1] = read_vertices[start + index];
             }
 
             // set all covered vertices from previous level as candidates
-            for (int j = num_mem; j < num_mem + number_of_covered; j++) {
+            for (int j = num_mem + 1; j <= num_mem + number_of_covered; j++) {
                 vertices[j].label = 0;
             }
-            if (number_of_covered > 0) {
-                qsort(vertices, total_vertices, sizeof(Vertex), sort_vertices);
-                number_of_covered = 0;
-            }
+            number_of_covered = 0;
 
 
 
@@ -1214,7 +1225,7 @@ void h_expand_level(CPU_Graph& graph, CPU_Data& host_data, CPU_Cliques& host_cli
 }
 
 // returns 1 if lookahead was a success, else 0
-bool h_lookahead_pruning(CPU_Cliques& host_cliques, Vertex* read_vertices, int tot_vert, uint64_t start)
+int h_lookahead_pruning(CPU_Cliques& host_cliques, Vertex* read_vertices, int tot_vert, uint64_t start)
 {
     bool lookahead_sucess = true;
     for (int j = 0; j < tot_vert; j++) {
@@ -1240,7 +1251,7 @@ bool h_lookahead_pruning(CPU_Cliques& host_cliques, Vertex* read_vertices, int t
 }
 
 // returns 1 is failed found or not enough vertices, else 0
-bool h_remove_one_vertex(CPU_Graph& graph, CPU_Data& host_data, Vertex* read_vertices, int& tot_vert, int& num_cand, int& num_mem, uint64_t start)
+int h_remove_one_vertex(CPU_Graph& graph, CPU_Data& host_data, Vertex* read_vertices, int& tot_vert, int& num_cand, int& num_mem, uint64_t start)
 {
     // intersection
     int pvertexid;
@@ -1312,7 +1323,7 @@ bool h_remove_one_vertex(CPU_Graph& graph, CPU_Data& host_data, Vertex* read_ver
 }
 
 // returns 2 if too many vertices pruned to be considered, 1 if failed found or invalid bound, 0 otherwise
-bool h_add_one_vertex(CPU_Graph& graph, CPU_Data& host_data, Vertex* vertices, int& total_vertices, int& number_of_candidates, int& number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg)
+int h_add_one_vertex(CPU_Graph& graph, CPU_Data& host_data, Vertex* vertices, int& total_vertices, int& number_of_candidates, int& number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg)
 {
     // helper variables
     bool method_return;
@@ -1326,9 +1337,9 @@ bool h_add_one_vertex(CPU_Graph& graph, CPU_Data& host_data, Vertex* vertices, i
     int phelper2;
 
 
-
     // ADD ONE VERTEX
-    vertices[total_vertices - 1].label = 1;
+    vertices[number_of_members].label = 1;
+    pvertexid = vertices[number_of_members].vertexid;
     number_of_members++;
     number_of_candidates--;
 
@@ -1337,7 +1348,6 @@ bool h_add_one_vertex(CPU_Graph& graph, CPU_Data& host_data, Vertex* vertices, i
         host_data.vertex_order_map[vertices[i].vertexid] = i;
     }
 
-    pvertexid = vertices[total_vertices - 1].vertexid;
     pneighbors_start = graph.onehop_offsets[pvertexid];
     pneighbors_end = graph.onehop_offsets[pvertexid + 1];
     pneighbors_count = pneighbors_end - pneighbors_start;
@@ -1349,26 +1359,26 @@ bool h_add_one_vertex(CPU_Graph& graph, CPU_Data& host_data, Vertex* vertices, i
             vertices[phelper1].exdeg--;
         }
     }
-    qsort(vertices, total_vertices, sizeof(Vertex), sort_vertices);
+
+    // reset vertex order map
+    for (int i = 0; i < total_vertices; i++) {
+        host_data.vertex_order_map[vertices[i].vertexid] = -1;
+    }
 
     
 
     // DIAMETER PRUNING
     h_diameter_pruning(graph, vertices, pvertexid, total_vertices, number_of_candidates, number_of_members);
 
+    // continue if not enough vertices after pruning
+    if (total_vertices < minimum_clique_size) {
+        return 2;
+    }
+
 
 
     // DEGREE-BASED PRUNING
-    if (total_vertices >= minimum_clique_size) {
-        method_return = h_degree_pruning(graph, vertices, total_vertices, number_of_candidates, number_of_members, upper_bound, lower_bound, min_ext_deg);
-    }
-
-
-
-    // reset vertex order map
-    for (int i = 0; i < total_vertices; i++) {
-        host_data.vertex_order_map[vertices[i].vertexid] = -1;
-    }
+    method_return = h_degree_pruning(graph, vertices, total_vertices, number_of_candidates, number_of_members, upper_bound, lower_bound, min_ext_deg);
 
     // continue if not enough vertices after pruning
     if (total_vertices < minimum_clique_size) {
@@ -1954,24 +1964,14 @@ inline int sort_vertices(const void* a, const void* b)
         return -1;
     }
 
-    // for ties: in clique low -> high, cand high -> low
-    else if ((*(Vertex*)a).label == 1 && (*(Vertex*)b).label == 1) {
-        if ((*(Vertex*)a).vertexid > (*(Vertex*)b).vertexid) {
-            return 1;
-        }
-        else if ((*(Vertex*)a).vertexid < (*(Vertex*)b).vertexid) {
-            return -1;
-        }
-        else {
-            return 0;
-        }
-    }
+    // for ties: in cand high -> low
+
     else if ((*(Vertex*)a).label == 0 && (*(Vertex*)b).label == 0) {
         if ((*(Vertex*)a).vertexid > (*(Vertex*)b).vertexid) {
-            return -1;
+            return 1;
         }
         else if ((*(Vertex*)a).vertexid < (*(Vertex*)b).vertexid) {
-            return 1;
+            return -1;
         }
         else {
             return 0;
@@ -3186,15 +3186,15 @@ __device__ int remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
     // initialize vertex order map
     for (int i = (ld.idx % WARP_SIZE); i < wd.tot_vert[ld.wib_idx]; i += WARP_SIZE) {
-        dd.vertex_order_map[ld.read_vertices[wd.start[ld.wib_idx] + i].vertexid] = i;
+        dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + ld.read_vertices[wd.start[ld.wib_idx] + i].vertexid] = i;
     }
     __syncwarp();
 
     // update info of vertices connected to removed cand
     pvertexid = ld.read_vertices[wd.start[ld.wib_idx] + wd.tot_vert[ld.wib_idx]].vertexid;
 
-    for (int i = (ld.idx % WARP_SIZE); i < dd.onehop_offsets[pvertexid + 1] - dd.onehop_offsets[pvertexid]; i += WARP_SIZE) {
-        phelper1 = dd.vertex_order_map[dd.onehop_neighbors[dd.onehop_offsets[pvertexid] + i]];
+    for (int i = dd.onehop_offsets[pvertexid] + (ld.idx % WARP_SIZE); i < dd.onehop_offsets[pvertexid + 1]; i += WARP_SIZE) {
+        phelper1 = dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + dd.onehop_neighbors[dd.onehop_neighbors[i]]];
 
         if (phelper1 > -1) {
             ld.read_vertices[wd.start[ld.wib_idx] + phelper1].exdeg--;
@@ -3208,8 +3208,8 @@ __device__ int remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     failed_found = __any_sync(0xFFFFFFFF, failed_found);
 
     if (!failed_found) {
-        for (int i = (ld.idx % WARP_SIZE); i < dd.twohop_offsets[pvertexid + 1] - dd.twohop_offsets[pvertexid]; i += WARP_SIZE) {
-            phelper1 = dd.vertex_order_map[dd.twohop_neighbors[dd.twohop_offsets[pvertexid] + i]];
+        for (int i = dd.twohop_offsets[pvertexid] + (ld.idx % WARP_SIZE); i < dd.twohop_offsets[pvertexid + 1]; i += WARP_SIZE) {
+            phelper1 = dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + dd.twohop_neighbors[dd.twohop_neighbors[i]]];
 
             if (phelper1 > -1) {
                 ld.read_vertices[wd.start[ld.wib_idx] + phelper1].lvl2adj--;
@@ -3220,7 +3220,7 @@ __device__ int remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
     // initialize vertex order map
     for (int i = (ld.idx % WARP_SIZE); i < wd.tot_vert[ld.wib_idx]; i += WARP_SIZE) {
-        dd.vertex_order_map[ld.read_vertices[wd.start[ld.wib_idx] + i].vertexid] = -1;
+        dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + ld.read_vertices[wd.start[ld.wib_idx] + i].vertexid] = -1;
     }
     __syncwarp();
 
@@ -3231,6 +3231,8 @@ __device__ int remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     return 0;
 }
 
+// when pruning each lane writes to its remaining or removed and increment count, then scan to get warp removed remaining write position then writes
+// when paralellizing parallelize inner loop to avoid race condition
 // returns 2, if too many vertices pruned to be considered, 1 if failed found or invalid bound, 0 otherwise
 __device__ int add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld) 
 {
