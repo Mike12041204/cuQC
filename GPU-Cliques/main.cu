@@ -2107,7 +2107,7 @@ inline bool h_cand_isvalid_LU(Vertex vertex, int clique_size, int upper_bound, i
     }
 }
 
-inline bool  h_vert_isextendable(Vertex vertex, int clique_size) 
+inline bool h_vert_isextendable(Vertex vertex, int clique_size) 
 {
     if (vertex.indeg + vertex.exdeg < minimum_degrees[minimum_clique_size]) {
         return false;
@@ -2123,7 +2123,7 @@ inline bool  h_vert_isextendable(Vertex vertex, int clique_size)
     }
 }
 
-inline bool  h_vert_isextendable_LU(Vertex vertex, int clique_size, int upper_bound, int lower_bound, int min_ext_deg)
+inline bool h_vert_isextendable_LU(Vertex vertex, int clique_size, int upper_bound, int lower_bound, int min_ext_deg)
 {
     if (vertex.indeg + vertex.exdeg < minimum_degrees[minimum_clique_size]) {
         return false;
@@ -2805,6 +2805,7 @@ __global__ void d_expand_level(GPU_Data dd)
 
     // helper variables, not passed through to any methods
     int method_return;
+    int index;
 
     // initialize variables
     ld.idx = (blockIdx.x * blockDim.x + threadIdx.x);
@@ -2890,9 +2891,17 @@ __global__ void d_expand_level(GPU_Data dd)
                 ld.vertices = dd.global_vertices + (WVERTICES_SIZE * (ld.idx / WARP_SIZE));
             }
 
-            for (int k = (ld.idx % WARP_SIZE); k < wd.total_vertices[ld.wib_idx]; k += WARP_SIZE) {
-                ld.vertices[k] = ld.read_vertices[wd.start[ld.wib_idx] + k];
+            for (index = (ld.idx % WARP_SIZE); index < wd.number_of_members[ld.wib_idx]; index += WARP_SIZE) {
+                ld.vertices[index] = ld.read_vertices[wd.start[ld.wib_idx] + index];
             }
+            for (; index < wd.total_vertices[ld.wib_idx] - 1; index += WARP_SIZE) {
+                ld.vertices[index + 1] = ld.read_vertices[wd.start[ld.wib_idx] + index];
+            }
+
+            if ((ld.idx % WARP_SIZE) == 0) {
+                ld.vertices[wd.number_of_members[ld.wib_idx]] = ld.read_vertices[wd.start[ld.wib_idx] + wd.total_vertices[ld.wib_idx] - 1];
+            }
+            __syncwarp();
 
 
 
@@ -3234,29 +3243,23 @@ __device__ int d_add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     int pvertexid;
     bool failed_found;
 
+
+
+    // ADD ONE VERTEX
+    pvertexid = ld.vertices[wd.number_of_members[ld.wib_idx]].vertexid;
+
     if ((ld.idx % WARP_SIZE) == 0) {
-        ld.vertices[wd.total_vertices[ld.wib_idx] - 1].label = 1;
+        ld.vertices[wd.number_of_members[ld.wib_idx]].label = 1;
         wd.number_of_members[ld.wib_idx]++;
         wd.number_of_candidates[ld.wib_idx]--;
     }
     __syncwarp();
 
     // update the exdeg and indeg of all vertices adj to the vertex just added to the vertex set
-    pvertexid = ld.vertices[wd.total_vertices[ld.wib_idx] - 1].vertexid;
     for (int k = (ld.idx % WARP_SIZE); k < wd.total_vertices[ld.wib_idx]; k += WARP_SIZE) {
         if (d_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[ld.vertices[k].vertexid], dd.onehop_offsets[ld.vertices[k].vertexid + 1] - dd.onehop_offsets[ld.vertices[k].vertexid], pvertexid) != -1) {
             ld.vertices[k].exdeg--;
             ld.vertices[k].indeg++;
-        }
-    }
-    __syncwarp();
-
-    // more efficient shift to put just added vertex at the end of all vertices in x
-    if ((ld.idx % WARP_SIZE) == 0) {
-        for (int i = wd.total_vertices[ld.wib_idx] - 1; i > wd.number_of_members[ld.wib_idx] - 1; i--) {
-            Vertex temp = ld.vertices[i];
-            ld.vertices[i] = ld.vertices[i - 1];
-            ld.vertices[i - 1] = temp;
         }
     }
     __syncwarp();
