@@ -25,7 +25,7 @@ using namespace std;
 
 // global memory size: 1.500.000.000 ints
 #define TASKS_SIZE 2000000
-#define EXPAND_THRESHOLD 352
+#define EXPAND_THRESHOLD 528
 #define BUFFER_SIZE 100000000
 #define BUFFER_OFFSET_SIZE 1000000
 #define CLIQUES_SIZE 2000000
@@ -44,12 +44,12 @@ using namespace std;
 #define VERTICES_SIZE 75
  
 // threads info
-#define BLOCK_SIZE 512
+#define BLOCK_SIZE 768
 #define NUM_OF_BLOCKS 22
 #define WARP_SIZE 32
 
 // run settings
-#define CPU_LEVELS_x2 0
+#define CPU_LEVELS_x2 100
 
 // VERTEX DATA
 struct Vertex
@@ -558,7 +558,7 @@ void search(CPU_Graph& input_graph, ofstream& temp_results)
 
         // DEBUG
         h_print_Data_Sizes(host_data, host_cliques);
-        print_CPU_Data(host_data);
+        //print_CPU_Data(host_data);
     }
 
     flush_cliques(host_cliques, temp_results);
@@ -1965,7 +1965,7 @@ inline int sort_vertices(const void* a, const void* b)
         return -1;
     }
 
-    // for ties: in cand high -> low
+    // for ties: in cand low -> high
 
     else if ((*(Vertex*)a).label == 0 && (*(Vertex*)b).label == 0) {
         if ((*(Vertex*)a).vertexid > (*(Vertex*)b).vertexid) {
@@ -3170,121 +3170,69 @@ __device__ int lookahead_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 // returns 1 if failed found after removing, 0 otherwise
 __device__ int remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld) 
 {
-    if (true) {
-        int pvertexid;
-        int phelper1;
-        bool failed_found;
+    int pvertexid;
+    int phelper1;
+    bool failed_found;
 
-        if (wd.tot_vert[ld.wib_idx] - 1 < (*dd.minimum_clique_size)) {
-            return 1;
-        }
-
-        // remove the last candidate in vertices
-        if ((ld.idx % WARP_SIZE) == 0) {
-            wd.num_cand[ld.wib_idx]--;
-            wd.tot_vert[ld.wib_idx]--;
-        }
-        __syncwarp();
-
-        // initialize vertex order map
-        for (int i = (ld.idx % WARP_SIZE); i < wd.tot_vert[ld.wib_idx]; i += WARP_SIZE) {
-            dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + ld.read_vertices[wd.start[ld.wib_idx] + i].vertexid] = i;
-        }
-        __syncwarp();
-
-        if (ld.idx == 0) {
-            printf("::: \n");
-            for (int i = 0; i < WVERTICES_SIZE; i++) {
-                printf("%i ", dd.vertex_order_map[i]);
-            }
-            printf(" :::\n");
-        }
-
-        // update info of vertices connected to removed cand
-        pvertexid = ld.read_vertices[wd.start[ld.wib_idx] + wd.tot_vert[ld.wib_idx]].vertexid;
-
-        for (int i = dd.onehop_offsets[pvertexid] + (ld.idx % WARP_SIZE); i < dd.onehop_offsets[pvertexid + 1]; i += WARP_SIZE) {
-            phelper1 = dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + dd.onehop_neighbors[i]];
-
-            if (phelper1 > -1) {
-                ld.read_vertices[wd.start[ld.wib_idx] + phelper1].exdeg--;
-
-                if (phelper1 < wd.num_mem[ld.wib_idx] && !device_vert_isextendable(ld.read_vertices[wd.start[ld.wib_idx] + phelper1], wd.num_mem[ld.wib_idx], dd)) {
-                    failed_found = true;
-                    break;
-                }
-            }
-        }
-        failed_found = __any_sync(0xFFFFFFFF, failed_found);
-
-        if (!failed_found) {
-            for (int i = dd.twohop_offsets[pvertexid] + (ld.idx % WARP_SIZE); i < dd.twohop_offsets[pvertexid + 1]; i += WARP_SIZE) {
-                phelper1 = dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + dd.twohop_neighbors[i]];
-
-                if (phelper1 > -1) {
-                    ld.read_vertices[wd.start[ld.wib_idx] + phelper1].lvl2adj--;
-                }
-            }
-            __syncwarp();
-        }
-
-        // reset vertex order map
-        for (int i = (ld.idx % WARP_SIZE); i < wd.tot_vert[ld.wib_idx]; i += WARP_SIZE) {
-            dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + ld.read_vertices[wd.start[ld.wib_idx] + i].vertexid] = -1;
-        }
-        __syncwarp();
-
-        if (failed_found) {
-            return 1;
-        }
-
-        return 0;
+    if (wd.tot_vert[ld.wib_idx] - 1 < (*dd.minimum_clique_size)) {
+        return 1;
     }
-    else {
-        int pvertexid;
-        bool failed_found;
 
-        if (wd.tot_vert[ld.wib_idx] - 1 < (*dd.minimum_clique_size)) {
-            return 1;
-        }
+    // remove the last candidate in vertices
+    if ((ld.idx % WARP_SIZE) == 0) {
+        wd.num_cand[ld.wib_idx]--;
+        wd.tot_vert[ld.wib_idx]--;
+    }
+    __syncwarp();
 
-        // remove the last candidate in vertices
-        if ((ld.idx % WARP_SIZE) == 0) {
-            wd.num_cand[ld.wib_idx]--;
-            wd.tot_vert[ld.wib_idx]--;
-        }
-        __syncwarp();
+    // initialize vertex order map
+    for (int i = (ld.idx % WARP_SIZE); i < wd.tot_vert[ld.wib_idx]; i += WARP_SIZE) {
+        dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + ld.read_vertices[wd.start[ld.wib_idx] + i].vertexid] = i;
+    }
+    __syncwarp();
 
-        // get the id of the removed vertex and update the degrees of its adjacencies
-        pvertexid = ld.read_vertices[wd.start[ld.wib_idx] + wd.tot_vert[ld.wib_idx]].vertexid;
-        for (int k = (ld.idx % WARP_SIZE); k < wd.tot_vert[ld.wib_idx]; k += WARP_SIZE) {
-            if (device_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[pvertexid], dd.onehop_offsets[pvertexid + 1] - dd.onehop_offsets[pvertexid], ld.read_vertices[wd.start[ld.wib_idx] + k].vertexid) != -1) {
-                ld.read_vertices[wd.start[ld.wib_idx] + k].exdeg--;
-            }
 
-            if (device_bsearch_array(dd.twohop_neighbors + dd.twohop_offsets[pvertexid], dd.twohop_offsets[pvertexid + 1] - dd.twohop_offsets[pvertexid], ld.read_vertices[wd.start[ld.wib_idx] + k].vertexid) != -1) {
-                ld.read_vertices[wd.start[ld.wib_idx] + k].lvl2adj--;
-            }
-        }
-        __syncwarp();
 
-        // check for failed vertices
-        failed_found = false;
-        for (int k = (ld.idx % WARP_SIZE); k < wd.num_mem[ld.wib_idx]; k += WARP_SIZE) {
-            if (!device_vert_isextendable(ld.read_vertices[wd.start[ld.wib_idx] + k], wd.num_mem[ld.wib_idx], dd)) {
+    // update info of vertices connected to removed cand
+    pvertexid = ld.read_vertices[wd.start[ld.wib_idx] + wd.tot_vert[ld.wib_idx]].vertexid;
+    failed_found = false;
+
+    for (int i = dd.onehop_offsets[pvertexid] + (ld.idx % WARP_SIZE); i < dd.onehop_offsets[pvertexid + 1]; i += WARP_SIZE) {
+        phelper1 = dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + dd.onehop_neighbors[i]];
+
+        if (phelper1 > -1) {
+            ld.read_vertices[wd.start[ld.wib_idx] + phelper1].exdeg--;
+
+            if (phelper1 < wd.num_mem[ld.wib_idx] && !device_vert_isextendable(ld.read_vertices[wd.start[ld.wib_idx] + phelper1], wd.num_mem[ld.wib_idx], dd)) {
                 failed_found = true;
                 break;
             }
-
         }
-        failed_found = __any_sync(0xFFFFFFFF, failed_found);
-
-        if (failed_found) {
-            return 1;
-        }
-
-        return 0;
     }
+    failed_found = __any_sync(0xFFFFFFFF, failed_found);
+
+    if (!failed_found) {
+        for (int i = dd.twohop_offsets[pvertexid] + (ld.idx % WARP_SIZE); i < dd.twohop_offsets[pvertexid + 1]; i += WARP_SIZE) {
+            phelper1 = dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + dd.twohop_neighbors[i]];
+
+            if (phelper1 > -1) {
+                ld.read_vertices[wd.start[ld.wib_idx] + phelper1].lvl2adj--;
+            }
+        }
+        __syncwarp();
+    }
+
+    // reset vertex order map
+    for (int i = (ld.idx % WARP_SIZE); i < wd.tot_vert[ld.wib_idx]; i += WARP_SIZE) {
+        dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + ld.read_vertices[wd.start[ld.wib_idx] + i].vertexid] = -1;
+    }
+    __syncwarp();
+
+    if (failed_found) {
+        return 1;
+    }
+
+    return 0;
 }
 
 // when pruning each lane writes to its remaining or removed and increment count, then scan to get warp removed remaining write position then writes
@@ -3882,10 +3830,10 @@ __device__ int sort_vert_ex(Vertex& vertex1, Vertex& vertex2)
     }
     else if (vertex1.label == 0 && vertex2.label == 0) {
         if (vertex1.vertexid > vertex2.vertexid) {
-            return -1;
+            return 1;
         }
         else if (vertex1.vertexid < vertex2.vertexid) {
-            return 1;
+            return -1;
         }
         else {
             return 0;
