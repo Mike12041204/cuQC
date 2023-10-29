@@ -49,7 +49,7 @@ using namespace std;
 #define WARP_SIZE 32
 
 // run settings
-#define CPU_LEVELS_x2 20
+#define CPU_LEVELS_x2 200
 
 // VERTEX DATA
 struct Vertex
@@ -1576,80 +1576,48 @@ int h_critical_vertex_pruning(CPU_Graph& hg, Vertex* vertices, int& total_vertic
 
 void h_diameter_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int pvertexid, int& total_vertices, int& number_of_candidates, int number_of_members)
 {
-    if (false) {
-        // intersection
-        uint64_t pneighbors_start;
-        uint64_t pneighbors_end;
-        int pneighbors_count;
-        int phelper1;
-        int phelper2;
+    // intersection
+    uint64_t pneighbors_start;
+    uint64_t pneighbors_end;
+    int pneighbors_count;
+    int phelper1;
+    int phelper2;
 
-        hd.remaining_count = 0;
+    (*hd.remaining_count) = 0;
 
-        pneighbors_start = hg.twohop_offsets[pvertexid];
-        pneighbors_end = hg.twohop_offsets[pvertexid + 1];
-        for (int i = pneighbors_start; i < pneighbors_end; i++) {
-            phelper1 = hd.vertex_order_map[hg.twohop_neighbors[i]];
+    pneighbors_start = hg.twohop_offsets[pvertexid];
+    pneighbors_end = hg.twohop_offsets[pvertexid + 1];
+    for (int i = pneighbors_start; i < pneighbors_end; i++) {
+        phelper1 = hd.vertex_order_map[hg.twohop_neighbors[i]];
+
+        if (phelper1 >= number_of_members) {
+            hd.remaining_candidates[(*hd.remaining_count)++] = hg.twohop_neighbors[i];
+        }
+    }
+
+    for (int i = 0; i < total_vertices; i++) {
+        vertices[i].exdeg = 0;
+    }
+
+    for (int i = 0; i < (*hd.remaining_count); i++) {
+        pvertexid = hd.remaining_candidates[i];
+        pneighbors_start = hg.onehop_offsets[pvertexid];
+        pneighbors_end = hg.onehop_offsets[pvertexid + 1];
+        for (int j = pneighbors_start; j < pneighbors_end; j++) {
+            phelper1 = hd.vertex_order_map[hg.onehop_neighbors[j]];
 
             if (phelper1 > -1) {
-                hd.remaining_candidates[(*hd.remaining_count)++] = hg.twohop_neighbors[i];
+                vertices[phelper1].exdeg++;
             }
         }
-
-        for (int i = 0; i < total_vertices; i++) {
-            vertices[i].exdeg = 0;
-        }
-
-        for (int i = 0; i < (*hd.remaining_count); i++) {
-            pvertexid = hd.remaining_candidates[i];
-            pneighbors_start = hg.onehop_offsets[pvertexid];
-            pneighbors_end = hg.onehop_offsets[pvertexid + 1];
-            for (int i = pneighbors_start; i < pneighbors_end; i++) {
-                phelper1 = hd.vertex_order_map[hg.twohop_neighbors[i]];
-
-                if (phelper1 > -1) {
-                    vertices[phelper1].exdeg++;
-                }
-            }
-        }
-
-        for (int i = 0; i < (*hd.remaining_count); i++) {
-            vertices[number_of_members + i] = vertices[hd.vertex_order_map[hd.remaining_candidates[i]]];
-        }
-
-        total_vertices -= number_of_candidates + (*hd.remaining_count);
-        number_of_candidates = (*hd.remaining_count);
     }
-    else {
-        // helper variables
-        int number_of_removed;
 
-        // intersection
-        uint64_t pneighbors_start;
-        uint64_t pneighbors_end;
-        int pneighbors_count;
-        int phelper1;
-        int phelper2;
-
-        number_of_removed = 0;
-        pneighbors_start = hg.twohop_offsets[pvertexid];
-        pneighbors_end = hg.twohop_offsets[pvertexid + 1];
-        pneighbors_count = pneighbors_end - pneighbors_start;
-        for (int j = number_of_members; j < total_vertices; j++) {
-            phelper1 = vertices[j].vertexid;
-            phelper2 = h_bsearch_array(hg.twohop_neighbors + pneighbors_start, pneighbors_count, phelper1);
-            if (phelper2 == -1) {
-                vertices[j].label = -1;
-                number_of_removed++;
-            }
-        }
-        qsort(vertices, total_vertices, sizeof(Vertex), h_sort_vert);
-
-        h_update_degrees(hg, vertices, total_vertices, number_of_removed);
-
-        total_vertices -= number_of_removed;
-        number_of_candidates -= number_of_removed;
+    for (int i = 0; i < (*hd.remaining_count); i++) {
+        vertices[number_of_members + i] = vertices[hd.vertex_order_map[hd.remaining_candidates[i]]];
     }
+
+    total_vertices = total_vertices - number_of_candidates + (*hd.remaining_count);
+    number_of_candidates = (*hd.remaining_count);
 }
 
 // returns true is invalid bounds calculated or a failed vertex was found, else false
