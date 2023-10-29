@@ -335,8 +335,8 @@ void free_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc);
 void RemoveNonMax(char* szset_filename, char* szoutput_filename);
 
 void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc);
-int h_lookahead_pruning(CPU_Cliques& hc, Vertex* read_vertices, int total_vertices, uint64_t start);
-int h_remove_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* read_vertices, int& total_vertices, int& number_of_candidates, int& number_of_vertices, uint64_t start);
+int h_lookahead_pruning(CPU_Graph& hg, CPU_Cliques& hc, CPU_Data& hd, Vertex* read_vertices, int tot_vert, int num_mem, int num_cand, uint64_t start);
+int h_remove_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* read_vertices, int& tot_vert, int& num_cand, int& num_vert, uint64_t start);
 int h_add_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_vertices, int& number_of_candidates, int& number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg);
 void h_diameter_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int pvertexid, int& total_vertices, int& number_of_candidates, int number_of_members);
 bool h_degree_pruning(CPU_Graph& hg, Vertex* vertices, int& total_vertices, int& number_of_candidates, int number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg);
@@ -984,7 +984,7 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc)
 
 
         // LOOKAHEAD PRUNING
-        method_return = h_lookahead_pruning(hc, read_vertices, tot_vert, start);
+        method_return = h_lookahead_pruning(hg, hc, hd, read_vertices, tot_vert, num_mem, num_cand, start);
         if (method_return) {
             continue;
         }
@@ -1222,11 +1222,51 @@ void free_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc)
 // --- HOST EXPANSION METHODS ---
 
 // returns 1 if lookahead was a success, else 0
-int h_lookahead_pruning(CPU_Cliques& hc, Vertex* read_vertices, int tot_vert, uint64_t start)
+int h_lookahead_pruning(CPU_Graph& hg, CPU_Cliques& hc, CPU_Data& hd, Vertex* read_vertices, int tot_vert, int num_mem, int num_cand, uint64_t start)
 {
-    bool lookahead_sucess = true;
-    for (int j = 0; j < tot_vert; j++) {
-        if (read_vertices[start + j].lvl2adj != tot_vert - 1 || read_vertices[start + j].indeg + read_vertices[start + j].exdeg < minimum_degrees[tot_vert]) {
+    // intersection
+    int pvertexid;
+    uint64_t pneighbors_start;
+    uint64_t pneighbors_end;
+    int pneighbors_count;
+    int phelper1;
+    int phelper2;
+
+    bool lookahead_sucess;
+
+    // initialize vertex order map
+    for (int i = num_mem; i < tot_vert; i++) {
+        hd.vertex_order_map[read_vertices[start + i].vertexid] = i;
+    }
+
+    // reset lvl2adj
+    for (int i = num_mem; i < tot_vert; i++) {
+        read_vertices[start + i].lvl2adj = 0;
+    }
+
+    // update lvl2adj to candidates for all vertices
+    for (int i = num_mem; i < tot_vert; i++) {
+        pvertexid = read_vertices[start + i].vertexid;
+        pneighbors_start = hg.twohop_offsets[pvertexid];
+        pneighbors_end = hg.twohop_offsets[pvertexid + 1];
+        for (int j = pneighbors_start; i < pneighbors_end; i++) {
+            phelper1 = hd.vertex_order_map[hg.twohop_neighbors[i]];
+
+            if (phelper1 >= num_mem) {
+                read_vertices[start + phelper1].lvl2adj++;
+            }
+        }
+    }
+
+    // reset vertex order map
+    for (int i = num_mem; i < tot_vert; i++) {
+        hd.vertex_order_map[read_vertices[start + i].vertexid] = -1;
+    }
+
+    // check for lookahead
+    lookahead_sucess = true;
+    for (int j = num_mem; j < tot_vert; j++) {
+        if (read_vertices[start + j].lvl2adj != num_cand - 1 || read_vertices[start + j].indeg + read_vertices[start + j].exdeg < minimum_degrees[tot_vert]) {
             lookahead_sucess = false;
             break;
         }
@@ -1257,6 +1297,7 @@ int h_remove_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* read_vertices, int&
     int pneighbors_count;
     int phelper1;
     int phelper2;
+
     int mindeg;
 
     bool failed_found = false;
@@ -1291,18 +1332,6 @@ int h_remove_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* read_vertices, int&
             if (phelper1 < num_mem && ! h_vert_isextendable(read_vertices[start + phelper1], num_mem)) {
                 failed_found = true;
                 break;
-            }
-        }
-    }
-
-    if (!failed_found) {
-        pneighbors_start = hg.twohop_offsets[pvertexid];
-        pneighbors_end = hg.twohop_offsets[pvertexid + 1];
-        for (int i = pneighbors_start; i < pneighbors_end; i++) {
-            phelper1 = hd.vertex_order_map[hg.twohop_neighbors[i]];
-
-            if (phelper1 > -1) {
-                read_vertices[start + phelper1].lvl2adj--;
             }
         }
     }
@@ -1547,48 +1576,80 @@ int h_critical_vertex_pruning(CPU_Graph& hg, Vertex* vertices, int& total_vertic
 
 void h_diameter_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int pvertexid, int& total_vertices, int& number_of_candidates, int number_of_members)
 {
-    // intersection
-    uint64_t pneighbors_start;
-    uint64_t pneighbors_end;
-    int pneighbors_count;
-    int phelper1;
-    int phelper2;
-    
-    hd.remaining_count = 0;
+    if (false) {
+        // intersection
+        uint64_t pneighbors_start;
+        uint64_t pneighbors_end;
+        int pneighbors_count;
+        int phelper1;
+        int phelper2;
 
-    pneighbors_start = hg.twohop_offsets[pvertexid];
-    pneighbors_end = hg.twohop_offsets[pvertexid + 1];
-    for (int i = pneighbors_start; i < pneighbors_end; i++) {
-        phelper1 = hd.vertex_order_map[hg.twohop_neighbors[i]];
+        hd.remaining_count = 0;
 
-        if (phelper1 > -1) {
-            hd.remaining_candidates[(*hd.remaining_count)++] = hg.twohop_neighbors[i];
-        }
-    }
-
-    for (int i = 0; i < total_vertices; i++) {
-        vertices[i].exdeg = 0;
-    }
-
-    for (int i = 0; i < (*hd.remaining_count); i++) {
-        pvertexid = hd.remaining_candidates[i];
-        pneighbors_start = hg.onehop_offsets[pvertexid];
-        pneighbors_end = hg.onehop_offsets[pvertexid + 1];
+        pneighbors_start = hg.twohop_offsets[pvertexid];
+        pneighbors_end = hg.twohop_offsets[pvertexid + 1];
         for (int i = pneighbors_start; i < pneighbors_end; i++) {
             phelper1 = hd.vertex_order_map[hg.twohop_neighbors[i]];
 
             if (phelper1 > -1) {
-                vertices[phelper1].exdeg++;
+                hd.remaining_candidates[(*hd.remaining_count)++] = hg.twohop_neighbors[i];
             }
         }
-    }
 
-    for (int i = 0; i < (*hd.remaining_count); i++) {
-        vertices[number_of_members + i] = vertices[hd.vertex_order_map[hd.remaining_candidates[i]]];
-    }
+        for (int i = 0; i < total_vertices; i++) {
+            vertices[i].exdeg = 0;
+        }
 
-    total_vertices -= number_of_candidates + (*hd.remaining_count);
-    number_of_candidates = (*hd.remaining_count);
+        for (int i = 0; i < (*hd.remaining_count); i++) {
+            pvertexid = hd.remaining_candidates[i];
+            pneighbors_start = hg.onehop_offsets[pvertexid];
+            pneighbors_end = hg.onehop_offsets[pvertexid + 1];
+            for (int i = pneighbors_start; i < pneighbors_end; i++) {
+                phelper1 = hd.vertex_order_map[hg.twohop_neighbors[i]];
+
+                if (phelper1 > -1) {
+                    vertices[phelper1].exdeg++;
+                }
+            }
+        }
+
+        for (int i = 0; i < (*hd.remaining_count); i++) {
+            vertices[number_of_members + i] = vertices[hd.vertex_order_map[hd.remaining_candidates[i]]];
+        }
+
+        total_vertices -= number_of_candidates + (*hd.remaining_count);
+        number_of_candidates = (*hd.remaining_count);
+    }
+    else {
+        // helper variables
+        int number_of_removed;
+
+        // intersection
+        uint64_t pneighbors_start;
+        uint64_t pneighbors_end;
+        int pneighbors_count;
+        int phelper1;
+        int phelper2;
+
+        number_of_removed = 0;
+        pneighbors_start = hg.twohop_offsets[pvertexid];
+        pneighbors_end = hg.twohop_offsets[pvertexid + 1];
+        pneighbors_count = pneighbors_end - pneighbors_start;
+        for (int j = number_of_members; j < total_vertices; j++) {
+            phelper1 = vertices[j].vertexid;
+            phelper2 = h_bsearch_array(hg.twohop_neighbors + pneighbors_start, pneighbors_count, phelper1);
+            if (phelper2 == -1) {
+                vertices[j].label = -1;
+                number_of_removed++;
+            }
+        }
+        qsort(vertices, total_vertices, sizeof(Vertex), h_sort_vert);
+
+        h_update_degrees(hg, vertices, total_vertices, number_of_removed);
+
+        total_vertices -= number_of_removed;
+        number_of_candidates -= number_of_removed;
+    }
 }
 
 // returns true is invalid bounds calculated or a failed vertex was found, else false
@@ -1782,14 +1843,6 @@ void h_update_degrees(CPU_Graph& hg, Vertex* vertices, int total_vertices, int n
             phelper2 = h_bsearch_array(hg.onehop_neighbors + pneighbors_start, pneighbors_count, pvertexid);
             if (phelper2 != -1) {
                 vertices[i].exdeg--;
-            }
-
-            pneighbors_start = hg.twohop_offsets[phelper1];
-            pneighbors_end = hg.twohop_offsets[phelper1 + 1];
-            pneighbors_count = pneighbors_end - pneighbors_start;
-            phelper2 = h_bsearch_array(hg.twohop_neighbors + pneighbors_start, pneighbors_count, pvertexid);
-            if (phelper2 != -1) {
-                vertices[i].lvl2adj--;
             }
         }
     }
@@ -3143,12 +3196,43 @@ __global__ void fill_from_buffer(GPU_Data dd)
 // returns 1 if lookahead succesful, 0 otherwise 
 __device__ int d_lookahead_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld) 
 {
-    bool lookahead_sucess = true;
+    bool lookahead_sucess;
+    int pvertexid;
+    int phelper1;
+
+    // initialize vertex order map
+    for (int i = wd.num_mem[ld.wib_idx] + (ld.idx % WARP_SIZE); i < wd.tot_vert[ld.wib_idx]; i += WARP_SIZE) {
+        dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + ld.read_vertices[wd.start[ld.wib_idx] + i].vertexid] = i;
+    }
+
+    // reset lvl2adj
+    for (int i = wd.num_mem[ld.wib_idx] + (ld.idx % WARP_SIZE); i < wd.tot_vert[ld.wib_idx]; i += WARP_SIZE) {
+        ld.read_vertices[wd.start[ld.wib_idx] + i].lvl2adj = 0;
+    }
+    __syncwarp();
+
+    // update lvl2adj to candidates for all vertices
+    for (int i = wd.num_mem[ld.wib_idx]; i < wd.tot_vert[ld.wib_idx]; i++) {
+        pvertexid = ld.read_vertices[wd.start[ld.wib_idx] + i].vertexid;
+        for (int j = dd.twohop_offsets[pvertexid] + (ld.idx % WARP_SIZE); i < dd.twohop_offsets[pvertexid + 1]; i += WARP_SIZE) {
+            phelper1 = dd.vertex_order_map[dd.twohop_neighbors[i]];
+
+            if (phelper1 >= wd.num_mem[ld.wib_idx]) {
+                ld.read_vertices[wd.start[ld.wib_idx] + phelper1].lvl2adj++;
+            }
+        }
+    }
+
+    // reset vertex order map
+    for (int i = wd.num_mem[ld.wib_idx] + (ld.idx % WARP_SIZE); i < wd.tot_vert[ld.wib_idx]; i += WARP_SIZE) {
+        dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + ld.read_vertices[wd.start[ld.wib_idx] + i].vertexid] = -1;
+    }
+
+    lookahead_sucess = true;
 
     // compares all vertices to the lemmas from Quick
-    for (int j = (ld.idx % WARP_SIZE); j < wd.tot_vert[ld.wib_idx]; j += WARP_SIZE) {
-        if (ld.read_vertices[wd.start[ld.wib_idx] + j].lvl2adj != (wd.tot_vert[ld.wib_idx] - 1) || ld.read_vertices[wd.start[ld.wib_idx] + j].indeg + 
-            ld.read_vertices[wd.start[ld.wib_idx] + j].exdeg < dd.minimum_degrees[wd.tot_vert[ld.wib_idx]]) {
+    for (int j = wd.num_mem[ld.wib_idx] + (ld.idx % WARP_SIZE); j < wd.tot_vert[ld.wib_idx]; j += WARP_SIZE) {
+        if (ld.read_vertices[wd.start[ld.wib_idx] + j].lvl2adj != wd.num_cand[ld.wib_idx] - 1 || ld.read_vertices[wd.start[ld.wib_idx] + j].indeg + ld.read_vertices[wd.start[ld.wib_idx] + j].exdeg < dd.minimum_degrees[wd.tot_vert[ld.wib_idx]]) {
             lookahead_sucess = false;
             break;
         }
@@ -3194,8 +3278,6 @@ __device__ int d_remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     }
     __syncwarp();
 
-
-
     // update info of vertices connected to removed cand
     pvertexid = ld.read_vertices[wd.start[ld.wib_idx] + wd.tot_vert[ld.wib_idx]].vertexid;
     failed_found = false;
@@ -3213,17 +3295,6 @@ __device__ int d_remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
         }
     }
     failed_found = __any_sync(0xFFFFFFFF, failed_found);
-
-    if (!failed_found) {
-        for (int i = dd.twohop_offsets[pvertexid] + (ld.idx % WARP_SIZE); i < dd.twohop_offsets[pvertexid + 1]; i += WARP_SIZE) {
-            phelper1 = dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + dd.twohop_neighbors[i]];
-
-            if (phelper1 > -1) {
-                ld.read_vertices[wd.start[ld.wib_idx] + phelper1].lvl2adj--;
-            }
-        }
-        __syncwarp();
-    }
 
     // reset vertex order map
     for (int i = (ld.idx % WARP_SIZE); i < wd.tot_vert[ld.wib_idx]; i += WARP_SIZE) {
@@ -3562,10 +3633,6 @@ __device__ void d_update_degrees(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, in
             if (d_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[ld.vertices[l].vertexid], dd.onehop_offsets[ld.vertices[l].vertexid + 1] - dd.onehop_offsets[ld.vertices[l].vertexid], pvertexid) != -1) {
                 ld.vertices[k].exdeg--;
             }
-
-            if (d_bsearch_array(dd.twohop_neighbors + dd.twohop_offsets[ld.vertices[l].vertexid], dd.twohop_offsets[ld.vertices[l].vertexid + 1] - dd.twohop_offsets[ld.vertices[l].vertexid], pvertexid) != -1) {
-                ld.vertices[k].lvl2adj--;
-            }
         }
     }
     __syncwarp();
@@ -3887,9 +3954,6 @@ __device__ bool d_cand_isvalid(Vertex& vertex, int number_of_members, GPU_Data& 
     if (vertex.indeg + vertex.exdeg < dd.minimum_degrees[(*(dd.minimum_clique_size))]) {
         return false;
     }
-    else if (vertex.lvl2adj < (*(dd.minimum_clique_size)) - 1) {
-        return false;
-    }
     else if (vertex.indeg + vertex.exdeg < d_get_mindeg(number_of_members + vertex.exdeg + 1, dd)) {
         return false;
     }
@@ -3901,9 +3965,6 @@ __device__ bool d_cand_isvalid(Vertex& vertex, int number_of_members, GPU_Data& 
 __device__ bool d_cand_isvalid_LU(Vertex& vertex, GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 {
     if (vertex.indeg + vertex.exdeg < dd.minimum_degrees[(*(dd.minimum_clique_size))]) {
-        return false;
-    }
-    else if (vertex.lvl2adj < (*(dd.minimum_clique_size)) - 1) {
         return false;
     }
     else if (vertex.indeg + vertex.exdeg < d_get_mindeg(wd.number_of_members[ld.wib_idx] + vertex.exdeg + 1, dd)) {
@@ -3928,9 +3989,6 @@ __device__ bool d_vert_isextendable(Vertex& vertex, int number_of_members, GPU_D
     if (vertex.indeg + vertex.exdeg < dd.minimum_degrees[(*(dd.minimum_clique_size))]) {
         return false;
     }
-    else if (vertex.lvl2adj < (*(dd.minimum_clique_size)) - 1) {
-        return false;
-    }
     else if (vertex.indeg + vertex.exdeg < d_get_mindeg(number_of_members + vertex.exdeg, dd)) {
         return false;
     }
@@ -3942,9 +4000,6 @@ __device__ bool d_vert_isextendable(Vertex& vertex, int number_of_members, GPU_D
 __device__ bool d_vert_isextendable_LU(Vertex& vertex, GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 {
     if (vertex.indeg + vertex.exdeg < dd.minimum_degrees[(*(dd.minimum_clique_size))]) {
-        return false;
-    }
-    else if (vertex.lvl2adj < (*(dd.minimum_clique_size)) - 1) {
         return false;
     }
     else if (vertex.indeg + vertex.exdeg < d_get_mindeg(wd.number_of_members[ld.wib_idx] + vertex.exdeg, dd)) {
