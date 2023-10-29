@@ -326,26 +326,26 @@ struct Local_Data
 // METHODS
 void calculate_minimum_degrees(CPU_Graph& hg);
 void search(CPU_Graph& hg, ofstream& temp_results);
-void allocate_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_cliques, CPU_Graph& hg);
-void initialize_tasks(CPU_Graph& hg, CPU_Data& host_data);
-void move_to_gpu(CPU_Data& host_data, GPU_Data& dd);
-void dump_cliques(CPU_Cliques& host_cliques, GPU_Data& dd, ofstream& output_file);
-void flush_cliques(CPU_Cliques& host_cliques, ofstream& temp_results);
-void free_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_cliques);
+void allocate_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc, CPU_Graph& hg);
+void initialize_tasks(CPU_Graph& hg, CPU_Data& hd);
+void move_to_gpu(CPU_Data& hd, GPU_Data& dd);
+void dump_cliques(CPU_Cliques& hc, GPU_Data& dd, ofstream& output_file);
+void flush_cliques(CPU_Cliques& hc, ofstream& temp_results);
+void free_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc);
 void RemoveNonMax(char* szset_filename, char* szoutput_filename);
 
-void h_expand_level(CPU_Graph& hg, CPU_Data& host_data, CPU_Cliques& host_cliques);
-int h_lookahead_pruning(CPU_Cliques& host_cliques, Vertex* read_vertices, int total_vertices, uint64_t start);
-int h_remove_one_vertex(CPU_Graph& hg, CPU_Data& host_data, Vertex* read_vertices, int& total_vertices, int& number_of_candidates, int& number_of_vertices, uint64_t start);
-int h_add_one_vertex(CPU_Graph& hg, CPU_Data& host_data, Vertex* vertices, int& total_vertices, int& number_of_candidates, int& number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg);
-void h_diameter_pruning(CPU_Graph& hg, Vertex* vertices, int pvertexid, int& total_vertices, int& number_of_candidates, int number_of_members);
+void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc);
+int h_lookahead_pruning(CPU_Cliques& hc, Vertex* read_vertices, int total_vertices, uint64_t start);
+int h_remove_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* read_vertices, int& total_vertices, int& number_of_candidates, int& number_of_vertices, uint64_t start);
+int h_add_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_vertices, int& number_of_candidates, int& number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg);
+void h_diameter_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int pvertexid, int& total_vertices, int& number_of_candidates, int number_of_members);
 bool h_degree_pruning(CPU_Graph& hg, Vertex* vertices, int& total_vertices, int& number_of_candidates, int number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg);
 bool h_calculate_LU_bounds(int& upper_bound, int& lower_bound, int& min_ext_deg, Vertex* vertices, int number_of_members, int number_of_candidates);
 void h_update_degrees(CPU_Graph& hg, Vertex* vertices, int total_vertices, int number_of_removed);
-void h_check_for_clique(CPU_Cliques& host_cliques, Vertex* vertices, int number_of_members);
+void h_check_for_clique(CPU_Cliques& hc, Vertex* vertices, int number_of_members);
 int h_critical_vertex_pruning(CPU_Graph& hg, Vertex* vertices, int& total_vertices, int& number_of_candidates, int& number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg);
-void h_write_to_tasks(CPU_Data& host_data, Vertex* vertices, int total_vertices, Vertex* write_vertices, uint64_t* write_offsets, uint64_t* write_count);
-void h_fill_from_buffer(CPU_Data& host_data, Vertex* write_vertices, uint64_t* write_offsets, uint64_t* write_count);
+void h_write_to_tasks(CPU_Data& hd, Vertex* vertices, int total_vertices, Vertex* write_vertices, uint64_t* write_offsets, uint64_t* write_count);
+void h_fill_from_buffer(CPU_Data& hd, Vertex* write_vertices, uint64_t* write_offsets, uint64_t* write_count);
 
 int h_bsearch_array(int* search_array, int array_size, int search_number);
 int h_lsearch_vert(Vertex* search_array, int array_size, int search_vertexid);
@@ -359,16 +359,16 @@ inline bool  h_vert_isextendable_LU(Vertex vertex, int clique_size, int upper_bo
 inline void chkerr(cudaError_t code);
 
 // DEBUG
-void print_CPU_Data(CPU_Data& host_data);
+void print_CPU_Data(CPU_Data& hd);
 void print_GPU_Data(GPU_Data& dd);
 void print_CPU_Graph(CPU_Graph& host_hg);
 void print_GPU_Graph(GPU_Data& dd, CPU_Graph& host_hg);
 void print_WTask_Buffers(GPU_Data& dd);
 void print_WClique_Buffers(GPU_Data& dd);
 void print_GPU_Cliques(GPU_Data& dd);
-void print_CPU_Cliques(CPU_Cliques& host_cliques);
+void print_CPU_Cliques(CPU_Cliques& hc);
 void print_Data_Sizes(GPU_Data& dd);
-void h_print_Data_Sizes(CPU_Data& host_data, CPU_Cliques& host_cliques);
+void h_print_Data_Sizes(CPU_Data& hd, CPU_Cliques& hc);
 void print_vertices(Vertex* vertices, int size);
 void print_Data_Sizes_Every(GPU_Data& dd, int every);
 bool print_Warp_Data_Sizes(GPU_Data& dd);
@@ -408,8 +408,8 @@ __device__ int d_get_mindeg(int number_of_members, GPU_Data& dd);
 
 
 // vertex order mp on the cpu
-// update cv pruning on the cpu
 // vertex order map on gpu
+// // update cv pruning on the cpu
 // cv pruning on gpu
 
 // debug update degrees on cpu
@@ -525,53 +525,53 @@ void calculate_minimum_degrees(CPU_Graph& hg)
 void search(CPU_Graph& hg, ofstream& temp_results) 
 {
     // DATA STRUCTURES
-    CPU_Data host_data;
-    CPU_Cliques host_cliques;
+    CPU_Data hd;
+    CPU_Cliques hc;
     GPU_Data dd;
 
     // HANDLE MEMORY
-    allocate_memory(host_data, dd, host_cliques, hg);
+    allocate_memory(hd, dd, hc, hg);
     cudaDeviceSynchronize();
 
     // INITIALIZE TASKS
     cout << ">:INITIALIZING TASKS" << endl;
-    initialize_tasks(hg, host_data);
+    initialize_tasks(hg, hd);
 
     // DEBUG
-    h_print_Data_Sizes(host_data, host_cliques);
-    //print_CPU_Data(host_data);
+    h_print_Data_Sizes(hd, hc);
+    //print_CPU_Data(hd);
 
     // CPU EXPANSION
     // cpu levels is multiplied by two to ensure that data ends up in tasks1, this allows us to always copy tasks1 without worry like before hybrid cpu approach
     // cpu expand must be called atleast one time to handle first round cover pruning as the gpu code cannot do this
-    for (int i = 0; i < 2 * (CPU_LEVELS_x2 + 1) && !(*host_data.maximal_expansion); i++) {
-        h_expand_level(hg, host_data, host_cliques);
+    for (int i = 0; i < 2 * (CPU_LEVELS_x2 + 1) && !(*hd.maximal_expansion); i++) {
+        h_expand_level(hg, hd, hc);
     
         // if cliques is more than half full, flush to file
-        if (host_cliques.cliques_offset[(*host_cliques.cliques_count)] > CLIQUES_SIZE / 2) {
-            flush_cliques(host_cliques, temp_results);
+        if (hc.cliques_offset[(*hc.cliques_count)] > CLIQUES_SIZE / 2) {
+            flush_cliques(hc, temp_results);
         }
 
         // DEBUG
-        h_print_Data_Sizes(host_data, host_cliques);
-        //print_CPU_Data(host_data);
+        h_print_Data_Sizes(hd, hc);
+        //print_CPU_Data(hd);
     }
 
-    flush_cliques(host_cliques, temp_results);
+    flush_cliques(hc, temp_results);
 
     // TRANSFER TO GPU
-    move_to_gpu(host_data, dd);
+    move_to_gpu(hd, dd);
     cudaDeviceSynchronize();
 
     // DEBUG
     //print_GPU_Graph(dd, hg);
-    //print_CPU_Data(host_data);
+    //print_CPU_Data(hd);
     //print_GPU_Data(dd);
     //print_Data_Sizes(dd);
 
     // EXPAND LEVEL
     cout << ">:BEGINNING EXPANSION" << endl;
-    while (!(*host_data.maximal_expansion))
+    while (!(*hd.maximal_expansion))
     {
         // reset loop variables
         chkerr(cudaMemset(dd.maximal_expansion, true, sizeof(bool)));
@@ -597,12 +597,12 @@ void search(CPU_Graph& hg, ofstream& temp_results)
         cudaDeviceSynchronize();
 
         // update the loop variables
-        chkerr(cudaMemcpy(host_data.maximal_expansion, dd.maximal_expansion, sizeof(bool), cudaMemcpyDeviceToHost));
-        chkerr(cudaMemcpy(host_data.dumping_cliques, dd.dumping_cliques, sizeof(bool), cudaMemcpyDeviceToHost));
+        chkerr(cudaMemcpy(hd.maximal_expansion, dd.maximal_expansion, sizeof(bool), cudaMemcpyDeviceToHost));
+        chkerr(cudaMemcpy(hd.dumping_cliques, dd.dumping_cliques, sizeof(bool), cudaMemcpyDeviceToHost));
         cudaDeviceSynchronize();
 
-        if (*host_data.dumping_cliques) {
-            dump_cliques(host_cliques, dd, temp_results);
+        if (*hd.dumping_cliques) {
+            dump_cliques(hc, dd, temp_results);
         }
 
         // DEBUG
@@ -613,14 +613,14 @@ void search(CPU_Graph& hg, ofstream& temp_results)
         //print_idebug(dd);
     }
 
-    dump_cliques(host_cliques, dd, temp_results);
+    dump_cliques(hc, dd, temp_results);
 
     // FREE MEMORY
-    free_memory(host_data, dd, host_cliques);
+    free_memory(hd, dd, hc);
 }
 
 // allocates memory for the data structures on the host and device
-void allocate_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_cliques, CPU_Graph& hg)
+void allocate_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc, CPU_Graph& hg)
 {
     int number_of_warps = (NUM_OF_BLOCKS * BLOCK_SIZE) / WARP_SIZE;
 
@@ -640,42 +640,42 @@ void allocate_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_clique
     chkerr(cudaMemcpy(dd.twohop_offsets, hg.twohop_offsets, sizeof(uint64_t) * (hg.number_of_vertices + 1), cudaMemcpyHostToDevice));
 
     // CPU DATA
-    host_data.tasks1_count = new uint64_t;
-    host_data.tasks1_offset = new uint64_t[EXPAND_THRESHOLD + 1];
-    host_data.tasks1_vertices = new Vertex[TASKS_SIZE];
+    hd.tasks1_count = new uint64_t;
+    hd.tasks1_offset = new uint64_t[EXPAND_THRESHOLD + 1];
+    hd.tasks1_vertices = new Vertex[TASKS_SIZE];
 
-    host_data.tasks1_offset[0] = 0;
-    (*(host_data.tasks1_count)) = 0;
+    hd.tasks1_offset[0] = 0;
+    (*(hd.tasks1_count)) = 0;
 
-    host_data.tasks2_count = new uint64_t;
-    host_data.tasks2_offset = new uint64_t[EXPAND_THRESHOLD + 1];
-    host_data.tasks2_vertices = new Vertex[TASKS_SIZE];
+    hd.tasks2_count = new uint64_t;
+    hd.tasks2_offset = new uint64_t[EXPAND_THRESHOLD + 1];
+    hd.tasks2_vertices = new Vertex[TASKS_SIZE];
 
-    host_data.tasks2_offset[0] = 0;
-    (*(host_data.tasks2_count)) = 0;
+    hd.tasks2_offset[0] = 0;
+    (*(hd.tasks2_count)) = 0;
 
-    host_data.buffer_count = new uint64_t;
-    host_data.buffer_offset = new uint64_t[BUFFER_OFFSET_SIZE];
-    host_data.buffer_vertices = new Vertex[BUFFER_SIZE];
+    hd.buffer_count = new uint64_t;
+    hd.buffer_offset = new uint64_t[BUFFER_OFFSET_SIZE];
+    hd.buffer_vertices = new Vertex[BUFFER_SIZE];
 
-    host_data.buffer_offset[0] = 0;
-    (*(host_data.buffer_count)) = 0;
+    hd.buffer_offset[0] = 0;
+    (*(hd.buffer_count)) = 0;
 
-    host_data.current_level = new uint64_t;
-    host_data.maximal_expansion = new bool;
-    host_data.dumping_cliques = new bool;
+    hd.current_level = new uint64_t;
+    hd.maximal_expansion = new bool;
+    hd.dumping_cliques = new bool;
 
-    (*host_data.current_level) = 0;
-    (*host_data.maximal_expansion) = false;
-    (*host_data.dumping_cliques) = false;
+    (*hd.current_level) = 0;
+    (*hd.maximal_expansion) = false;
+    (*hd.dumping_cliques) = false;
 
-    host_data.vertex_order_map = new int[hg.number_of_vertices];
-    host_data.remaining_candidates = new int[hg.number_of_vertices];
-    host_data.removed_candidates = new int[hg.number_of_vertices];
-    host_data.remaining_count = new int;
-    host_data.removed_count = new int;
+    hd.vertex_order_map = new int[hg.number_of_vertices];
+    hd.remaining_candidates = new int[hg.number_of_vertices];
+    hd.removed_candidates = new int[hg.number_of_vertices];
+    hd.remaining_count = new int;
+    hd.removed_count = new int;
 
-    memset(host_data.vertex_order_map, -1, sizeof(int) * hg.number_of_vertices);
+    memset(hd.vertex_order_map, -1, sizeof(int) * hg.number_of_vertices);
 
     // GPU DATA
     chkerr(cudaMalloc((void**)&dd.current_level, sizeof(uint64_t)));
@@ -733,12 +733,12 @@ void allocate_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_clique
     chkerr(cudaMemset(dd.total_tasks, 0, sizeof(int)));
 
     // CPU CLIQUES
-    host_cliques.cliques_count = new uint64_t;
-    host_cliques.cliques_vertex = new int[CLIQUES_SIZE];
-    host_cliques.cliques_offset = new uint64_t[CLIQUES_OFFSET_SIZE];
+    hc.cliques_count = new uint64_t;
+    hc.cliques_vertex = new int[CLIQUES_SIZE];
+    hc.cliques_offset = new uint64_t[CLIQUES_OFFSET_SIZE];
 
-    host_cliques.cliques_offset[0] = 0;
-    (*(host_cliques.cliques_count)) = 0;
+    hc.cliques_offset[0] = 0;
+    (*(hc.cliques_count)) = 0;
 
     // GPU CLIQUES
     chkerr(cudaMalloc((void**)&dd.cliques_count, sizeof(uint64_t)));
@@ -773,7 +773,7 @@ void allocate_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_clique
 }
 
 // processes 0th level of expansion
-void initialize_tasks(CPU_Graph& hg, CPU_Data& host_data)
+void initialize_tasks(CPU_Graph& hg, CPU_Data& hd)
 {
     // intersection
     int pvertexid;
@@ -885,20 +885,20 @@ void initialize_tasks(CPU_Graph& hg, CPU_Data& host_data)
     {
 
         for (int j = 0; j < total_vertices; j++) {
-            host_data.tasks1_vertices[j].vertexid = vertices[j].vertexid;
-            host_data.tasks1_vertices[j].label = vertices[j].label;
-            host_data.tasks1_vertices[j].indeg = vertices[j].indeg;
-            host_data.tasks1_vertices[j].exdeg = vertices[j].exdeg;
-            host_data.tasks1_vertices[j].lvl2adj = vertices[j].lvl2adj;
+            hd.tasks1_vertices[j].vertexid = vertices[j].vertexid;
+            hd.tasks1_vertices[j].label = vertices[j].label;
+            hd.tasks1_vertices[j].indeg = vertices[j].indeg;
+            hd.tasks1_vertices[j].exdeg = vertices[j].exdeg;
+            hd.tasks1_vertices[j].lvl2adj = vertices[j].lvl2adj;
         }
-        (*(host_data.tasks1_count))++;
-        host_data.tasks1_offset[(*(host_data.tasks1_count))] = total_vertices;
+        (*(hd.tasks1_count))++;
+        hd.tasks1_offset[(*(hd.tasks1_count))] = total_vertices;
     }
 
     delete vertices;
 }
 
-void h_expand_level(CPU_Graph& hg, CPU_Data& host_data, CPU_Cliques& host_cliques)
+void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc)
 {
     // initiate the variables containing the location of the read and write task vectors, done in an alternating, odd-even manner like the c-intersection of cuTS
     uint64_t* read_count;
@@ -933,27 +933,27 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& host_data, CPU_Cliques& host_clique
 
 
 
-    if ((*host_data.current_level) % 2 == 0) {
-        read_count = host_data.tasks1_count;
-        read_offsets = host_data.tasks1_offset;
-        read_vertices = host_data.tasks1_vertices;
-        write_count = host_data.tasks2_count;
-        write_offsets = host_data.tasks2_offset;
-        write_vertices = host_data.tasks2_vertices;
+    if ((*hd.current_level) % 2 == 0) {
+        read_count = hd.tasks1_count;
+        read_offsets = hd.tasks1_offset;
+        read_vertices = hd.tasks1_vertices;
+        write_count = hd.tasks2_count;
+        write_offsets = hd.tasks2_offset;
+        write_vertices = hd.tasks2_vertices;
     }
     else {
-        read_count = host_data.tasks2_count;
-        read_offsets = host_data.tasks2_offset;
-        read_vertices = host_data.tasks2_vertices;
-        write_count = host_data.tasks1_count;
-        write_offsets = host_data.tasks1_offset;
-        write_vertices = host_data.tasks1_vertices;
+        read_count = hd.tasks2_count;
+        read_offsets = hd.tasks2_offset;
+        read_vertices = hd.tasks2_vertices;
+        write_count = hd.tasks1_count;
+        write_offsets = hd.tasks1_offset;
+        write_vertices = hd.tasks1_vertices;
     }
     *write_count = 0;
     write_offsets[0] = 0;
 
     // set to false later if task is generated indicating non-maximal expansion
-    (*host_data.maximal_expansion) = true;
+    (*hd.maximal_expansion) = true;
 
 
 
@@ -984,7 +984,7 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& host_data, CPU_Cliques& host_clique
 
 
         // LOOKAHEAD PRUNING
-        method_return = h_lookahead_pruning(host_cliques, read_vertices, tot_vert, start);
+        method_return = h_lookahead_pruning(hc, read_vertices, tot_vert, start);
         if (method_return) {
             continue;
         }
@@ -998,7 +998,7 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& host_data, CPU_Cliques& host_clique
 
             // REMOVE ONE VERTEX
             if (j != number_of_covered) {
-                method_return = h_remove_one_vertex(hg, host_data, read_vertices, tot_vert, num_cand, num_mem, start);
+                method_return = h_remove_one_vertex(hg, hd, read_vertices, tot_vert, num_cand, num_mem, start);
                 if (method_return) {
                     break;
                 }
@@ -1028,7 +1028,7 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& host_data, CPU_Cliques& host_clique
 
 
             // ADD ONE VERTEX
-            method_return = h_add_one_vertex(hg, host_data, vertices, total_vertices, number_of_candidates, number_of_members, upper_bound, lower_bound, min_ext_deg);
+            method_return = h_add_one_vertex(hg, hd, vertices, total_vertices, number_of_candidates, number_of_members, upper_bound, lower_bound, min_ext_deg);
 
             // continue if not enough vertices after pruning
             if (method_return == 2) {
@@ -1038,7 +1038,7 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& host_data, CPU_Cliques& host_clique
             // if vertex in x found as not extendable, check if current set is clique and continue to next iteration
             if (method_return == 1) {
                 if (number_of_members >= minimum_clique_size) {
-                    h_check_for_clique(host_cliques, vertices, number_of_members);
+                    h_check_for_clique(hc, vertices, number_of_members);
                 }
 
                 continue;
@@ -1060,7 +1060,7 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& host_data, CPU_Cliques& host_clique
 
             // CHECK FOR CLIQUE
             if (number_of_members >= minimum_clique_size) {
-                h_check_for_clique(host_cliques, vertices, number_of_members);
+                h_check_for_clique(hc, vertices, number_of_members);
             }
 
             // if vertex in x found as not extendable, check if current set is clique and continue to next iteration
@@ -1072,7 +1072,7 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& host_data, CPU_Cliques& host_clique
 
             // WRITE TO TASKS
             if (number_of_candidates > 0) {
-                h_write_to_tasks(host_data, vertices, total_vertices, write_vertices, write_offsets, write_count);
+                h_write_to_tasks(hd, vertices, total_vertices, write_vertices, write_offsets, write_count);
             }
 
 
@@ -1084,59 +1084,59 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& host_data, CPU_Cliques& host_clique
 
 
     // FILL TASKS FROM BUFFER
-    if (*write_count < EXPAND_THRESHOLD && (*host_data.buffer_count) > 0)
+    if (*write_count < EXPAND_THRESHOLD && (*hd.buffer_count) > 0)
     {
-        h_fill_from_buffer(host_data, write_vertices, write_offsets, write_count);
+        h_fill_from_buffer(hd, write_vertices, write_offsets, write_count);
     }
 
-    (*host_data.current_level)++;
+    (*hd.current_level)++;
 }
 
-void move_to_gpu(CPU_Data& host_data, GPU_Data& dd)
+void move_to_gpu(CPU_Data& hd, GPU_Data& dd)
 {
-    chkerr(cudaMemcpy(dd.tasks1_count, host_data.tasks1_count, sizeof(uint64_t), cudaMemcpyHostToDevice));
-    chkerr(cudaMemcpy(dd.tasks1_offset, host_data.tasks1_offset, (EXPAND_THRESHOLD + 1) * sizeof(uint64_t), cudaMemcpyHostToDevice));
-    chkerr(cudaMemcpy(dd.tasks1_vertices, host_data.tasks1_vertices, (TASKS_SIZE) * sizeof(Vertex), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(dd.tasks1_count, hd.tasks1_count, sizeof(uint64_t), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(dd.tasks1_offset, hd.tasks1_offset, (EXPAND_THRESHOLD + 1) * sizeof(uint64_t), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(dd.tasks1_vertices, hd.tasks1_vertices, (TASKS_SIZE) * sizeof(Vertex), cudaMemcpyHostToDevice));
 
-    chkerr(cudaMemcpy(dd.buffer_count, host_data.buffer_count, sizeof(uint64_t), cudaMemcpyHostToDevice));
-    chkerr(cudaMemcpy(dd.buffer_offset, host_data.buffer_offset, (BUFFER_OFFSET_SIZE) * sizeof(uint64_t), cudaMemcpyHostToDevice));
-    chkerr(cudaMemcpy(dd.buffer_vertices, host_data.buffer_vertices, (BUFFER_SIZE) * sizeof(int), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(dd.buffer_count, hd.buffer_count, sizeof(uint64_t), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(dd.buffer_offset, hd.buffer_offset, (BUFFER_OFFSET_SIZE) * sizeof(uint64_t), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(dd.buffer_vertices, hd.buffer_vertices, (BUFFER_SIZE) * sizeof(int), cudaMemcpyHostToDevice));
 
-    chkerr(cudaMemcpy(dd.maximal_expansion, host_data.maximal_expansion, sizeof(bool), cudaMemcpyHostToDevice));
-    chkerr(cudaMemcpy(dd.current_level, host_data.current_level, sizeof(uint64_t), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(dd.maximal_expansion, hd.maximal_expansion, sizeof(bool), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(dd.current_level, hd.current_level, sizeof(uint64_t), cudaMemcpyHostToDevice));
 }
 
-void dump_cliques(CPU_Cliques& host_cliques, GPU_Data& dd, ofstream& temp_results)
+void dump_cliques(CPU_Cliques& hc, GPU_Data& dd, ofstream& temp_results)
 {
     // gpu cliques to cpu cliques
-    chkerr(cudaMemcpy(host_cliques.cliques_count, dd.cliques_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(host_cliques.cliques_offset, dd.cliques_offset, sizeof(uint64_t) * CLIQUES_OFFSET_SIZE, cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(host_cliques.cliques_vertex, dd.cliques_vertex, sizeof(int) * CLIQUES_SIZE, cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(hc.cliques_count, dd.cliques_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(hc.cliques_offset, dd.cliques_offset, sizeof(uint64_t) * CLIQUES_OFFSET_SIZE, cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(hc.cliques_vertex, dd.cliques_vertex, sizeof(int) * CLIQUES_SIZE, cudaMemcpyDeviceToHost));
     cudaDeviceSynchronize();
 
     // DEBUG
-    //print_CPU_Cliques(host_cliques);
+    //print_CPU_Cliques(hc);
 
-    flush_cliques(host_cliques, temp_results);
+    flush_cliques(hc, temp_results);
 
     cudaMemset(dd.cliques_count, 0, sizeof(uint64_t));
 }
 
-void flush_cliques(CPU_Cliques& host_cliques, ofstream& temp_results) 
+void flush_cliques(CPU_Cliques& hc, ofstream& temp_results) 
 {
-    for (int i = 0; i < ((*host_cliques.cliques_count)); i++) {
-        uint64_t start = host_cliques.cliques_offset[i];
-        uint64_t end = host_cliques.cliques_offset[i + 1];
+    for (int i = 0; i < ((*hc.cliques_count)); i++) {
+        uint64_t start = hc.cliques_offset[i];
+        uint64_t end = hc.cliques_offset[i + 1];
         temp_results << end - start << " ";
         for (uint64_t j = start; j < end; j++) {
-            temp_results << host_cliques.cliques_vertex[j] << " ";
+            temp_results << hc.cliques_vertex[j] << " ";
         }
         temp_results << "\n";
     }
-    ((*host_cliques.cliques_count)) = 0;
+    ((*hc.cliques_count)) = 0;
 }
 
-void free_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_cliques)
+void free_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc)
 {
     // GPU GRAPH
     chkerr(cudaFree(dd.number_of_vertices));
@@ -1147,20 +1147,20 @@ void free_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_cliques)
     chkerr(cudaFree(dd.twohop_offsets));
 
     // CPU DATA
-    delete host_data.tasks1_count;
-    delete host_data.tasks1_offset;
-    delete host_data.tasks1_vertices;
+    delete hd.tasks1_count;
+    delete hd.tasks1_offset;
+    delete hd.tasks1_vertices;
 
-    delete host_data.tasks2_count;
-    delete host_data.tasks2_offset;
-    delete host_data.tasks2_vertices;
+    delete hd.tasks2_count;
+    delete hd.tasks2_offset;
+    delete hd.tasks2_vertices;
 
-    delete host_data.buffer_count;
-    delete host_data.buffer_offset;
-    delete host_data.buffer_vertices;
+    delete hd.buffer_count;
+    delete hd.buffer_offset;
+    delete hd.buffer_vertices;
 
-    delete host_data.maximal_expansion;
-    delete host_data.dumping_cliques;
+    delete hd.maximal_expansion;
+    delete hd.dumping_cliques;
 
     // GPU DATA
     chkerr(cudaFree(dd.current_level));
@@ -1194,9 +1194,9 @@ void free_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_cliques)
     chkerr(cudaFree(dd.total_tasks));
 
     // CPU CLIQUES
-    delete host_cliques.cliques_count;
-    delete host_cliques.cliques_vertex;
-    delete host_cliques.cliques_offset;
+    delete hc.cliques_count;
+    delete hc.cliques_vertex;
+    delete hc.cliques_offset;
 
     // GPU CLIQUES
     chkerr(cudaFree(dd.cliques_count));
@@ -1222,7 +1222,7 @@ void free_memory(CPU_Data& host_data, GPU_Data& dd, CPU_Cliques& host_cliques)
 // --- HOST EXPANSION METHODS ---
 
 // returns 1 if lookahead was a success, else 0
-int h_lookahead_pruning(CPU_Cliques& host_cliques, Vertex* read_vertices, int tot_vert, uint64_t start)
+int h_lookahead_pruning(CPU_Cliques& hc, Vertex* read_vertices, int tot_vert, uint64_t start)
 {
     bool lookahead_sucess = true;
     for (int j = 0; j < tot_vert; j++) {
@@ -1234,12 +1234,12 @@ int h_lookahead_pruning(CPU_Cliques& host_cliques, Vertex* read_vertices, int to
 
     if (lookahead_sucess) {
         // write to cliques
-        uint64_t start_write = host_cliques.cliques_offset[(*host_cliques.cliques_count)];
+        uint64_t start_write = hc.cliques_offset[(*hc.cliques_count)];
         for (int j = 0; j < tot_vert; j++) {
-            host_cliques.cliques_vertex[start_write + j] = read_vertices[start + j].vertexid;
+            hc.cliques_vertex[start_write + j] = read_vertices[start + j].vertexid;
         }
-        (*host_cliques.cliques_count)++;
-        host_cliques.cliques_offset[(*host_cliques.cliques_count)] = start_write + tot_vert;
+        (*hc.cliques_count)++;
+        hc.cliques_offset[(*hc.cliques_count)] = start_write + tot_vert;
 
         return 1;
     }
@@ -1248,7 +1248,7 @@ int h_lookahead_pruning(CPU_Cliques& host_cliques, Vertex* read_vertices, int to
 }
 
 // returns 1 is failed found or not enough vertices, else 0
-int h_remove_one_vertex(CPU_Graph& hg, CPU_Data& host_data, Vertex* read_vertices, int& tot_vert, int& num_cand, int& num_mem, uint64_t start)
+int h_remove_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* read_vertices, int& tot_vert, int& num_cand, int& num_mem, uint64_t start)
 {
     // intersection
     int pvertexid;
@@ -1275,7 +1275,7 @@ int h_remove_one_vertex(CPU_Graph& hg, CPU_Data& host_data, Vertex* read_vertice
 
     // initialize vertex order map
     for (int i = 0; i < tot_vert; i++) {
-        host_data.vertex_order_map[read_vertices[start + i].vertexid] = i;
+        hd.vertex_order_map[read_vertices[start + i].vertexid] = i;
     }
 
     // update info of vertices connected to removed cand
@@ -1283,7 +1283,7 @@ int h_remove_one_vertex(CPU_Graph& hg, CPU_Data& host_data, Vertex* read_vertice
     pneighbors_start = hg.onehop_offsets[pvertexid];
     pneighbors_end = hg.onehop_offsets[pvertexid + 1];
     for (int i = pneighbors_start; i < pneighbors_end; i++) {
-        phelper1 = host_data.vertex_order_map[hg.onehop_neighbors[i]];
+        phelper1 = hd.vertex_order_map[hg.onehop_neighbors[i]];
 
         if (phelper1 > -1) {
             read_vertices[start + phelper1].exdeg--;
@@ -1299,7 +1299,7 @@ int h_remove_one_vertex(CPU_Graph& hg, CPU_Data& host_data, Vertex* read_vertice
         pneighbors_start = hg.twohop_offsets[pvertexid];
         pneighbors_end = hg.twohop_offsets[pvertexid + 1];
         for (int i = pneighbors_start; i < pneighbors_end; i++) {
-            phelper1 = host_data.vertex_order_map[hg.twohop_neighbors[i]];
+            phelper1 = hd.vertex_order_map[hg.twohop_neighbors[i]];
 
             if (phelper1 > -1) {
                 read_vertices[start + phelper1].lvl2adj--;
@@ -1309,7 +1309,7 @@ int h_remove_one_vertex(CPU_Graph& hg, CPU_Data& host_data, Vertex* read_vertice
 
     // reset vertex order map
     for (int i = 0; i < tot_vert; i++) {
-        host_data.vertex_order_map[read_vertices[start + i].vertexid] = -1;
+        hd.vertex_order_map[read_vertices[start + i].vertexid] = -1;
     }
 
     if (failed_found) {
@@ -1320,7 +1320,7 @@ int h_remove_one_vertex(CPU_Graph& hg, CPU_Data& host_data, Vertex* read_vertice
 }
 
 // returns 2 if too many vertices pruned to be considered, 1 if failed found or invalid bound, 0 otherwise
-int h_add_one_vertex(CPU_Graph& hg, CPU_Data& host_data, Vertex* vertices, int& total_vertices, int& number_of_candidates, int& number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg)
+int h_add_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_vertices, int& number_of_candidates, int& number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg)
 {
     // helper variables
     bool method_return;
@@ -1334,6 +1334,7 @@ int h_add_one_vertex(CPU_Graph& hg, CPU_Data& host_data, Vertex* vertices, int& 
     int phelper2;
 
 
+
     // ADD ONE VERTEX
     pvertexid = vertices[number_of_members].vertexid;
 
@@ -1343,14 +1344,14 @@ int h_add_one_vertex(CPU_Graph& hg, CPU_Data& host_data, Vertex* vertices, int& 
 
     // initialize vertex order map
     for (int i = 0; i < total_vertices; i++) {
-        host_data.vertex_order_map[vertices[i].vertexid] = i;
+        hd.vertex_order_map[vertices[i].vertexid] = i;
     }
 
     pneighbors_start = hg.onehop_offsets[pvertexid];
     pneighbors_end = hg.onehop_offsets[pvertexid + 1];
     pneighbors_count = pneighbors_end - pneighbors_start;
     for (int i = 0; i < pneighbors_count; i++) {
-        phelper1 = host_data.vertex_order_map[hg.onehop_neighbors[pneighbors_start + i]];
+        phelper1 = hd.vertex_order_map[hg.onehop_neighbors[pneighbors_start + i]];
         
         if (phelper1 > -1) {
             vertices[phelper1].indeg++;
@@ -1358,15 +1359,15 @@ int h_add_one_vertex(CPU_Graph& hg, CPU_Data& host_data, Vertex* vertices, int& 
         }
     }
 
-    // reset vertex order map
-    for (int i = 0; i < total_vertices; i++) {
-        host_data.vertex_order_map[vertices[i].vertexid] = -1;
-    }
-
     
 
     // DIAMETER PRUNING
-    h_diameter_pruning(hg, vertices, pvertexid, total_vertices, number_of_candidates, number_of_members);
+    h_diameter_pruning(hg, hd, vertices, pvertexid, total_vertices, number_of_candidates, number_of_members);
+
+    // reset vertex order map
+    for (int i = 0; i < total_vertices; i++) {
+        hd.vertex_order_map[vertices[i].vertexid] = -1;
+    }
 
     // continue if not enough vertices after pruning
     if (total_vertices < minimum_clique_size) {
@@ -1544,36 +1545,50 @@ int h_critical_vertex_pruning(CPU_Graph& hg, Vertex* vertices, int& total_vertic
     return 0;
 }
 
-void h_diameter_pruning(CPU_Graph& hg, Vertex* vertices, int pvertexid, int& total_vertices, int& number_of_candidates, int number_of_members)
+void h_diameter_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int pvertexid, int& total_vertices, int& number_of_candidates, int number_of_members)
 {
-    // helper variables
-    int number_of_removed;
-
     // intersection
     uint64_t pneighbors_start;
     uint64_t pneighbors_end;
     int pneighbors_count;
     int phelper1;
     int phelper2;
+    
+    hd.remaining_count = 0;
 
-    number_of_removed = 0;
     pneighbors_start = hg.twohop_offsets[pvertexid];
     pneighbors_end = hg.twohop_offsets[pvertexid + 1];
-    pneighbors_count = pneighbors_end - pneighbors_start;
-    for (int j = number_of_members; j < total_vertices; j++) {
-        phelper1 = vertices[j].vertexid;
-        phelper2 = h_bsearch_array(hg.twohop_neighbors + pneighbors_start, pneighbors_count, phelper1);
-        if (phelper2 == -1) {
-            vertices[j].label = -1;
-            number_of_removed++;
+    for (int i = pneighbors_start; i < pneighbors_end; i++) {
+        phelper1 = hd.vertex_order_map[hg.twohop_neighbors[i]];
+
+        if (phelper1 > -1) {
+            hd.remaining_candidates[(*hd.remaining_count)++] = hg.twohop_neighbors[i];
         }
     }
-    qsort(vertices, total_vertices, sizeof(Vertex), h_sort_vert);
 
-    h_update_degrees(hg, vertices, total_vertices, number_of_removed);
+    for (int i = 0; i < total_vertices; i++) {
+        vertices[i].exdeg = 0;
+    }
 
-    total_vertices -= number_of_removed;
-    number_of_candidates -= number_of_removed;
+    for (int i = 0; i < (*hd.remaining_count); i++) {
+        pvertexid = hd.remaining_candidates[i];
+        pneighbors_start = hg.onehop_offsets[pvertexid];
+        pneighbors_end = hg.onehop_offsets[pvertexid + 1];
+        for (int i = pneighbors_start; i < pneighbors_end; i++) {
+            phelper1 = hd.vertex_order_map[hg.twohop_neighbors[i]];
+
+            if (phelper1 > -1) {
+                vertices[phelper1].exdeg++;
+            }
+        }
+    }
+
+    for (int i = 0; i < (*hd.remaining_count); i++) {
+        vertices[number_of_members + i] = vertices[hd.vertex_order_map[hd.remaining_candidates[i]]];
+    }
+
+    total_vertices -= number_of_candidates + (*hd.remaining_count);
+    number_of_candidates = (*hd.remaining_count);
 }
 
 // returns true is invalid bounds calculated or a failed vertex was found, else false
@@ -1780,7 +1795,7 @@ void h_update_degrees(CPU_Graph& hg, Vertex* vertices, int total_vertices, int n
     }
 }
 
-void h_check_for_clique(CPU_Cliques& host_cliques, Vertex* vertices, int number_of_members)
+void h_check_for_clique(CPU_Cliques& hc, Vertex* vertices, int number_of_members)
 {
     bool clique = true;
 
@@ -1794,18 +1809,18 @@ void h_check_for_clique(CPU_Cliques& host_cliques, Vertex* vertices, int number_
 
     // if clique write to cliques array
     if (clique) {
-        uint64_t start_write = host_cliques.cliques_offset[(*host_cliques.cliques_count)];
+        uint64_t start_write = hc.cliques_offset[(*hc.cliques_count)];
         for (int k = 0; k < number_of_members; k++) {
-            host_cliques.cliques_vertex[start_write + k] = vertices[k].vertexid;
+            hc.cliques_vertex[start_write + k] = vertices[k].vertexid;
         }
-        (*host_cliques.cliques_count)++;
-        host_cliques.cliques_offset[(*host_cliques.cliques_count)] = start_write + number_of_members;
+        (*hc.cliques_count)++;
+        hc.cliques_offset[(*hc.cliques_count)] = start_write + number_of_members;
     }
 }
 
-void h_write_to_tasks(CPU_Data& host_data, Vertex* vertices, int total_vertices, Vertex* write_vertices, uint64_t* write_offsets, uint64_t* write_count)
+void h_write_to_tasks(CPU_Data& hd, Vertex* vertices, int total_vertices, Vertex* write_vertices, uint64_t* write_offsets, uint64_t* write_count)
 {
-    (*host_data.maximal_expansion) = false;
+    (*hd.maximal_expansion) = false;
 
     if ((*write_count) < EXPAND_THRESHOLD) {
         uint64_t start_write = write_offsets[*write_count];
@@ -1821,43 +1836,43 @@ void h_write_to_tasks(CPU_Data& host_data, Vertex* vertices, int total_vertices,
         write_offsets[*write_count] = start_write + total_vertices;
     }
     else {
-        uint64_t start_write = host_data.buffer_offset[(*host_data.buffer_count)];
+        uint64_t start_write = hd.buffer_offset[(*hd.buffer_count)];
 
         for (int k = 0; k < total_vertices; k++) {
-            host_data.buffer_vertices[start_write + k].vertexid = vertices[k].vertexid;
-            host_data.buffer_vertices[start_write + k].label = vertices[k].label;
-            host_data.buffer_vertices[start_write + k].indeg = vertices[k].indeg;
-            host_data.buffer_vertices[start_write + k].exdeg = vertices[k].exdeg;
-            host_data.buffer_vertices[start_write + k].lvl2adj = vertices[k].lvl2adj;
+            hd.buffer_vertices[start_write + k].vertexid = vertices[k].vertexid;
+            hd.buffer_vertices[start_write + k].label = vertices[k].label;
+            hd.buffer_vertices[start_write + k].indeg = vertices[k].indeg;
+            hd.buffer_vertices[start_write + k].exdeg = vertices[k].exdeg;
+            hd.buffer_vertices[start_write + k].lvl2adj = vertices[k].lvl2adj;
         }
-        (*host_data.buffer_count)++;
-        host_data.buffer_offset[(*host_data.buffer_count)] = start_write + total_vertices;
+        (*hd.buffer_count)++;
+        hd.buffer_offset[(*hd.buffer_count)] = start_write + total_vertices;
     }
 }
 
-void h_fill_from_buffer(CPU_Data& host_data, Vertex* write_vertices, uint64_t* write_offsets, uint64_t* write_count)
+void h_fill_from_buffer(CPU_Data& hd, Vertex* write_vertices, uint64_t* write_offsets, uint64_t* write_count)
 {
     // read from end of buffer, write to end of tasks, decrement buffer
-    (*host_data.maximal_expansion) = false;
+    (*hd.maximal_expansion) = false;
 
     // get read and write locations
-    int write_amount = ((*host_data.buffer_count) >= (EXPAND_THRESHOLD - *write_count)) ? EXPAND_THRESHOLD - *write_count : (*host_data.buffer_count);
-    uint64_t start_buffer = host_data.buffer_offset[(*host_data.buffer_count) - write_amount];
-    uint64_t end_buffer = host_data.buffer_offset[(*host_data.buffer_count)];
+    int write_amount = ((*hd.buffer_count) >= (EXPAND_THRESHOLD - *write_count)) ? EXPAND_THRESHOLD - *write_count : (*hd.buffer_count);
+    uint64_t start_buffer = hd.buffer_offset[(*hd.buffer_count) - write_amount];
+    uint64_t end_buffer = hd.buffer_offset[(*hd.buffer_count)];
     uint64_t size_buffer = end_buffer - start_buffer;
     uint64_t start_write = write_offsets[*write_count];
 
     // copy tasks data from end of buffer to end of tasks
-    memcpy(&write_vertices[start_write], &host_data.buffer_vertices[start_buffer], sizeof(Vertex) * size_buffer);
+    memcpy(&write_vertices[start_write], &hd.buffer_vertices[start_buffer], sizeof(Vertex) * size_buffer);
 
     // handle offsets
     for (int j = 1; j <= write_amount; j++) {
-        write_offsets[*write_count + j] = start_write + (host_data.buffer_offset[(*host_data.buffer_count) - write_amount + j] - start_buffer);
+        write_offsets[*write_count + j] = start_write + (hd.buffer_offset[(*hd.buffer_count) - write_amount + j] - start_buffer);
     }
 
     // update counts
     (*write_count) += write_amount;
-    (*host_data.buffer_count) -= write_amount;
+    (*hd.buffer_count) -= write_amount;
 }
 
 
@@ -2071,9 +2086,6 @@ inline bool h_cand_isvalid(Vertex vertex, int clique_size) {
     if (vertex.indeg + vertex.exdeg < minimum_degrees[minimum_clique_size]) {
         return false;
     }
-    else if (vertex.lvl2adj < minimum_clique_size - 1) {
-        return false;
-    }
     else if (vertex.indeg + vertex.exdeg < h_get_mindeg(clique_size + vertex.exdeg + 1)) {
         return false;
     }
@@ -2085,9 +2097,6 @@ inline bool h_cand_isvalid(Vertex vertex, int clique_size) {
 inline bool h_cand_isvalid_LU(Vertex vertex, int clique_size, int upper_bound, int lower_bound, int min_ext_deg) 
 {
     if (vertex.indeg + vertex.exdeg < minimum_degrees[minimum_clique_size]) {
-        return false;
-    }
-    else if (vertex.lvl2adj < minimum_clique_size - 1) {
         return false;
     }
     else if (vertex.indeg + vertex.exdeg < h_get_mindeg(clique_size + vertex.exdeg + 1)) {
@@ -2112,9 +2121,6 @@ inline bool h_vert_isextendable(Vertex vertex, int clique_size)
     if (vertex.indeg + vertex.exdeg < minimum_degrees[minimum_clique_size]) {
         return false;
     }
-    else if (vertex.lvl2adj < minimum_clique_size - 1) {
-        return false;
-    }
     else if (vertex.indeg + vertex.exdeg < h_get_mindeg(clique_size + vertex.exdeg)) {
         return false;
     }
@@ -2126,9 +2132,6 @@ inline bool h_vert_isextendable(Vertex vertex, int clique_size)
 inline bool h_vert_isextendable_LU(Vertex vertex, int clique_size, int upper_bound, int lower_bound, int min_ext_deg)
 {
     if (vertex.indeg + vertex.exdeg < minimum_degrees[minimum_clique_size]) {
-        return false;
-    }
-    else if (vertex.lvl2adj < minimum_clique_size - 1) {
         return false;
     }
     else if (vertex.indeg + vertex.exdeg < h_get_mindeg(clique_size + vertex.exdeg)) {
@@ -2232,85 +2235,85 @@ void print_GPU_Graph(GPU_Data& dd, CPU_Graph& host_hg)
     delete twohop_neighbors;
 }
 
-void print_CPU_Data(CPU_Data& host_data)
+void print_CPU_Data(CPU_Data& hd)
 {
     cout << endl << " --- (CPU_Data)host_data details --- " << endl;
-    cout << endl << "Tasks1: " << "Size: " << (*(host_data.tasks1_count)) << endl;
+    cout << endl << "Tasks1: " << "Size: " << (*(hd.tasks1_count)) << endl;
     cout << endl << "Offsets:" << endl;
-    for (uint64_t i = 0; i <= (*(host_data.tasks1_count)); i++) {
-        cout << host_data.tasks1_offset[i] << " ";
+    for (uint64_t i = 0; i <= (*(hd.tasks1_count)); i++) {
+        cout << hd.tasks1_offset[i] << " ";
     }
     cout << endl << "Vertex:" << endl;
-    for (uint64_t i = 0; i < host_data.tasks1_offset[(*(host_data.tasks1_count))]; i++) {
-        cout << host_data.tasks1_vertices[i].vertexid << " ";
+    for (uint64_t i = 0; i < hd.tasks1_offset[(*(hd.tasks1_count))]; i++) {
+        cout << hd.tasks1_vertices[i].vertexid << " ";
     }
     cout << endl << "Label:" << endl;
-    for (uint64_t i = 0; i < host_data.tasks1_offset[(*(host_data.tasks1_count))]; i++) {
-        cout << host_data.tasks1_vertices[i].label << " ";
+    for (uint64_t i = 0; i < hd.tasks1_offset[(*(hd.tasks1_count))]; i++) {
+        cout << hd.tasks1_vertices[i].label << " ";
     }
     cout << endl << "Indeg:" << endl;
-    for (uint64_t i = 0; i < host_data.tasks1_offset[(*(host_data.tasks1_count))]; i++) {
-        cout << host_data.tasks1_vertices[i].indeg << " ";
+    for (uint64_t i = 0; i < hd.tasks1_offset[(*(hd.tasks1_count))]; i++) {
+        cout << hd.tasks1_vertices[i].indeg << " ";
     }
     cout << endl << "Exdeg:" << endl;
-    for (uint64_t i = 0; i < host_data.tasks1_offset[(*(host_data.tasks1_count))]; i++) {
-        cout << host_data.tasks1_vertices[i].exdeg << " ";
+    for (uint64_t i = 0; i < hd.tasks1_offset[(*(hd.tasks1_count))]; i++) {
+        cout << hd.tasks1_vertices[i].exdeg << " ";
     }
     cout << endl << "Lvl2adj:" << endl;
-    for (uint64_t i = 0; i < host_data.tasks1_offset[(*(host_data.tasks1_count))]; i++) {
-        cout << host_data.tasks1_vertices[i].lvl2adj << " ";
+    for (uint64_t i = 0; i < hd.tasks1_offset[(*(hd.tasks1_count))]; i++) {
+        cout << hd.tasks1_vertices[i].lvl2adj << " ";
     }
 
-    cout << endl << endl << "Tasks2: " << "Size: " << (*(host_data.tasks2_count)) << endl;
+    cout << endl << endl << "Tasks2: " << "Size: " << (*(hd.tasks2_count)) << endl;
     cout << endl << "Offsets:" << endl;
-    for (uint64_t i = 0; i <= (*(host_data.tasks2_count)); i++) {
-        cout << host_data.tasks2_offset[i] << " ";
+    for (uint64_t i = 0; i <= (*(hd.tasks2_count)); i++) {
+        cout << hd.tasks2_offset[i] << " ";
     }
     cout << endl << "Vertex:" << endl;
-    for (uint64_t i = 0; i < host_data.tasks2_offset[(*(host_data.tasks2_count))]; i++) {
-        cout << host_data.tasks2_vertices[i].vertexid << " ";
+    for (uint64_t i = 0; i < hd.tasks2_offset[(*(hd.tasks2_count))]; i++) {
+        cout << hd.tasks2_vertices[i].vertexid << " ";
     }
     cout << endl << "Label:" << endl;
-    for (uint64_t i = 0; i < host_data.tasks2_offset[(*(host_data.tasks2_count))]; i++) {
-        cout << host_data.tasks2_vertices[i].label << " ";
+    for (uint64_t i = 0; i < hd.tasks2_offset[(*(hd.tasks2_count))]; i++) {
+        cout << hd.tasks2_vertices[i].label << " ";
     }
     cout << endl << "Indeg:" << endl;
-    for (uint64_t i = 0; i < host_data.tasks2_offset[(*(host_data.tasks2_count))]; i++) {
-        cout << host_data.tasks2_vertices[i].indeg << " ";
+    for (uint64_t i = 0; i < hd.tasks2_offset[(*(hd.tasks2_count))]; i++) {
+        cout << hd.tasks2_vertices[i].indeg << " ";
     }
     cout << endl << "Exdeg:" << endl;
-    for (uint64_t i = 0; i < host_data.tasks2_offset[(*(host_data.tasks2_count))]; i++) {
-        cout << host_data.tasks2_vertices[i].exdeg << " ";
+    for (uint64_t i = 0; i < hd.tasks2_offset[(*(hd.tasks2_count))]; i++) {
+        cout << hd.tasks2_vertices[i].exdeg << " ";
     }
     cout << endl << "Lvl2adj:" << endl;
-    for (uint64_t i = 0; i < host_data.tasks2_offset[(*(host_data.tasks2_count))]; i++) {
-        cout << host_data.tasks2_vertices[i].lvl2adj << " ";
+    for (uint64_t i = 0; i < hd.tasks2_offset[(*(hd.tasks2_count))]; i++) {
+        cout << hd.tasks2_vertices[i].lvl2adj << " ";
     }
 
-    cout << endl << endl << "Buffer: " << "Size: " << (*(host_data.buffer_count)) << endl;
+    cout << endl << endl << "Buffer: " << "Size: " << (*(hd.buffer_count)) << endl;
     cout << endl << "Offsets:" << endl;
-    for (uint64_t i = 0; i <= (*(host_data.buffer_count)); i++) {
-        cout << host_data.buffer_offset[i] << " ";
+    for (uint64_t i = 0; i <= (*(hd.buffer_count)); i++) {
+        cout << hd.buffer_offset[i] << " ";
     }
     cout << endl << "Vertex:" << endl;
-    for (uint64_t i = 0; i < host_data.buffer_offset[(*(host_data.buffer_count))]; i++) {
-        cout << host_data.buffer_vertices[i].vertexid << " ";
+    for (uint64_t i = 0; i < hd.buffer_offset[(*(hd.buffer_count))]; i++) {
+        cout << hd.buffer_vertices[i].vertexid << " ";
     }
     cout << endl << "Label:" << endl;
-    for (uint64_t i = 0; i < host_data.buffer_offset[(*(host_data.buffer_count))]; i++) {
-        cout << host_data.buffer_vertices[i].label << " ";
+    for (uint64_t i = 0; i < hd.buffer_offset[(*(hd.buffer_count))]; i++) {
+        cout << hd.buffer_vertices[i].label << " ";
     }
     cout << endl << "Indeg:" << endl;
-    for (uint64_t i = 0; i < host_data.buffer_offset[(*(host_data.buffer_count))]; i++) {
-        cout << host_data.buffer_vertices[i].indeg << " ";
+    for (uint64_t i = 0; i < hd.buffer_offset[(*(hd.buffer_count))]; i++) {
+        cout << hd.buffer_vertices[i].indeg << " ";
     }
     cout << endl << "Exdeg:" << endl;
-    for (uint64_t i = 0; i < host_data.buffer_offset[(*(host_data.buffer_count))]; i++) {
-        cout << host_data.buffer_vertices[i].exdeg << " ";
+    for (uint64_t i = 0; i < hd.buffer_offset[(*(hd.buffer_count))]; i++) {
+        cout << hd.buffer_vertices[i].exdeg << " ";
     }
     cout << endl << "Lvl2adj:" << endl;
-    for (uint64_t i = 0; i < host_data.buffer_offset[(*(host_data.buffer_count))]; i++) {
-        cout << host_data.buffer_vertices[i].lvl2adj << " ";
+    for (uint64_t i = 0; i < hd.buffer_offset[(*(hd.buffer_count))]; i++) {
+        cout << hd.buffer_vertices[i].lvl2adj << " ";
     }
     cout << endl << endl;
 }
@@ -2617,11 +2620,11 @@ void print_Data_Sizes(GPU_Data& dd)
     delete cliques_size;
 }
 
-void h_print_Data_Sizes(CPU_Data& host_data, CPU_Cliques& host_cliques)
+void h_print_Data_Sizes(CPU_Data& hd, CPU_Cliques& hc)
 {
-    cout << "L: " << (*host_data.current_level) << " T1: " << (*host_data.tasks1_count) << " " << (*(host_data.tasks1_offset + (*host_data.tasks1_count))) << " T2: " << (*host_data.tasks2_count) << " " << 
-        (*(host_data.tasks2_offset + (*host_data.tasks2_count))) << " B: " << (*host_data.buffer_count) << " " << (*(host_data.buffer_offset + (*host_data.buffer_count))) << " C: " << 
-        (*host_cliques.cliques_count) << " " << (*(host_cliques.cliques_offset + (*host_cliques.cliques_count))) << endl;
+    cout << "L: " << (*hd.current_level) << " T1: " << (*hd.tasks1_count) << " " << (*(hd.tasks1_offset + (*hd.tasks1_count))) << " T2: " << (*hd.tasks2_count) << " " << 
+        (*(hd.tasks2_offset + (*hd.tasks2_count))) << " B: " << (*hd.buffer_count) << " " << (*(hd.buffer_offset + (*hd.buffer_count))) << " C: " << 
+        (*hc.cliques_count) << " " << (*(hc.cliques_offset + (*hc.cliques_count))) << endl;
 }
 
 void print_WTask_Buffers(GPU_Data& dd)
@@ -2749,17 +2752,17 @@ void print_GPU_Cliques(GPU_Data& dd)
     cout << endl;
 }
 
-void print_CPU_Cliques(CPU_Cliques& host_cliques)
+void print_CPU_Cliques(CPU_Cliques& hc)
 {
     cout << endl << " --- (CPU_Cliques)host_cliques details --- " << endl;
-    cout << endl << "Cliques: " << "Size: " << (*(host_cliques.cliques_count)) << endl;
+    cout << endl << "Cliques: " << "Size: " << (*(hc.cliques_count)) << endl;
     cout << endl << "Offsets:" << endl;
-    for (uint64_t i = 0; i <= (*(host_cliques.cliques_count)); i++) {
-        cout << host_cliques.cliques_offset[i] << " ";
+    for (uint64_t i = 0; i <= (*(hc.cliques_count)); i++) {
+        cout << hc.cliques_offset[i] << " ";
     }
     cout << endl << "Vertex:" << endl;
-    for (uint64_t i = 0; i < host_cliques.cliques_offset[(*(host_cliques.cliques_count))]; i++) {
-        cout << host_cliques.cliques_vertex[i] << " ";
+    for (uint64_t i = 0; i < hc.cliques_offset[(*(hc.cliques_count))]; i++) {
+        cout << hc.cliques_vertex[i] << " ";
     }
     cout << endl;
 }
@@ -3236,7 +3239,7 @@ __device__ int d_remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 }
 
 // when pruning each lane writes to its remaining or removed and increment count, then scan to get warp removed remaining write position then writes
-// when paralellizing parallelize inner loop to avoid race condition
+// when parallelizing parallelize inner loop to avoid race condition
 // returns 2, if too many vertices pruned to be considered, 1 if failed found or invalid bound, 0 otherwise
 __device__ int d_add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld) 
 {
