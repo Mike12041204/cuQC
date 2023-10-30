@@ -204,6 +204,7 @@ struct CPU_Data
     int* removed_candidates;
     int* remaining_count;
     int* removed_count;
+    int* candidate_indegs;
 };
 
 // CPU CLIQUES
@@ -539,7 +540,7 @@ void search(CPU_Graph& hg, ofstream& temp_results)
 
     // DEBUG
     h_print_Data_Sizes(hd, hc);
-    //print_CPU_Data(hd);
+    print_CPU_Data(hd);
 
     // CPU EXPANSION
     // cpu levels is multiplied by two to ensure that data ends up in tasks1, this allows us to always copy tasks1 without worry like before hybrid cpu approach
@@ -554,7 +555,7 @@ void search(CPU_Graph& hg, ofstream& temp_results)
 
         // DEBUG
         h_print_Data_Sizes(hd, hc);
-        //print_CPU_Data(hd);
+        print_CPU_Data(hd);
     }
 
     flush_cliques(hc, temp_results);
@@ -674,6 +675,7 @@ void allocate_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc, CPU_Graph& hg)
     hd.removed_candidates = new int[hg.number_of_vertices];
     hd.remaining_count = new int;
     hd.removed_count = new int;
+    hd.candidate_indegs = new int[hg.number_of_vertices];
 
     memset(hd.vertex_order_map, -1, sizeof(int) * hg.number_of_vertices);
 
@@ -1159,8 +1161,16 @@ void free_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc)
     delete hd.buffer_offset;
     delete hd.buffer_vertices;
 
+    delete hd.current_level;
     delete hd.maximal_expansion;
     delete hd.dumping_cliques;
+
+    delete hd.vertex_order_map;
+    delete hd.remaining_candidates;
+    delete hd.remaining_count;
+    delete hd.removed_candidates;
+    delete hd.removed_count;
+    delete hd.candidate_indegs;
 
     // GPU DATA
     chkerr(cudaFree(dd.current_level));
@@ -1353,6 +1363,7 @@ int h_add_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_v
 {
     // helper variables
     bool method_return;
+    int start_total;
 
     // intersection
     int pvertexid;
@@ -1381,25 +1392,34 @@ int h_add_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_v
     pneighbors_count = pneighbors_end - pneighbors_start;
     for (int i = 0; i < pneighbors_count; i++) {
         phelper1 = hd.vertex_order_map[hg.onehop_neighbors[pneighbors_start + i]];
-        
+
         if (phelper1 > -1) {
             vertices[phelper1].indeg++;
             vertices[phelper1].exdeg--;
         }
     }
 
-    
+
 
     // DIAMETER PRUNING
-    h_diameter_pruning(hg, hd, vertices, pvertexid, total_vertices, number_of_candidates, number_of_members);
+    //h_diameter_pruning(hg, hd, vertices, pvertexid, total_vertices, number_of_candidates, number_of_members);
 
-    // reset vertex order map
-    for (int i = 0; i < total_vertices; i++) {
-        hd.vertex_order_map[vertices[i].vertexid] = -1;
+    // commenting out, has to go after degree when degree is updated
+    if (false){
+        for (int i = 0; i < (*hd.remaining_count); i++) {
+            vertices[number_of_members + i] = vertices[hd.vertex_order_map[hd.remaining_candidates[i]]];
+        }
+
+        total_vertices = total_vertices - number_of_candidates + (*hd.remaining_count);
+        number_of_candidates = (*hd.remaining_count);
     }
 
     // continue if not enough vertices after pruning
     if (total_vertices < minimum_clique_size) {
+        for (int i = 0; i < hg.number_of_vertices; i++) {
+            hd.vertex_order_map[i] = -1;
+        }
+
         return 2;
     }
 
@@ -1407,6 +1427,10 @@ int h_add_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_v
 
     // DEGREE-BASED PRUNING
     method_return = h_degree_pruning(hg, vertices, total_vertices, number_of_candidates, number_of_members, upper_bound, lower_bound, min_ext_deg);
+
+    for (int i = 0; i < hg.number_of_vertices; i++) {
+        hd.vertex_order_map[i] = -1;
+    }
 
     // continue if not enough vertices after pruning
     if (total_vertices < minimum_clique_size) {
@@ -1591,7 +1615,8 @@ void h_diameter_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int pvert
         phelper1 = hd.vertex_order_map[hg.twohop_neighbors[i]];
 
         if (phelper1 >= number_of_members) {
-            hd.remaining_candidates[(*hd.remaining_count)++] = hg.twohop_neighbors[i];
+            hd.candidate_indegs[(*hd.remaining_count)] = vertices[phelper1].indeg;
+            hd.remaining_candidates[(*hd.remaining_count)++] = vertices[phelper1].vertexid;
         }
     }
 
@@ -1992,10 +2017,10 @@ inline int h_sort_vert(const void* a, const void* b)
 
     else if ((*(Vertex*)a).label == 0 && (*(Vertex*)b).label == 0) {
         if ((*(Vertex*)a).vertexid > (*(Vertex*)b).vertexid) {
-            return 1;
+            return -1;
         }
         else if ((*(Vertex*)a).vertexid < (*(Vertex*)b).vertexid) {
-            return -1;
+            return 1;
         }
         else {
             return 0;
