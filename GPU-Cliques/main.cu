@@ -540,7 +540,7 @@ void search(CPU_Graph& hg, ofstream& temp_results)
 
     // DEBUG
     h_print_Data_Sizes(hd, hc);
-    print_CPU_Data(hd);
+    //print_CPU_Data(hd);
 
     // CPU EXPANSION
     // cpu levels is multiplied by two to ensure that data ends up in tasks1, this allows us to always copy tasks1 without worry like before hybrid cpu approach
@@ -555,7 +555,7 @@ void search(CPU_Graph& hg, ofstream& temp_results)
 
         // DEBUG
         h_print_Data_Sizes(hd, hc);
-        print_CPU_Data(hd);
+        //print_CPU_Data(hd);
     }
 
     flush_cliques(hc, temp_results);
@@ -1025,7 +1025,6 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc)
             for (int j = num_mem + 1; j <= num_mem + number_of_covered; j++) {
                 vertices[j].label = 0;
             }
-            number_of_covered = 0;
 
 
 
@@ -1231,6 +1230,7 @@ void free_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc)
 
 // --- HOST EXPANSION METHODS ---
 
+// CURSOR - doesnt work when only considering candidates, x should have property of being 2hop from all and meeting deg req, but maybe not diam isnt working first, so fix that first
 // returns 1 if lookahead was a success, else 0
 int h_lookahead_pruning(CPU_Graph& hg, CPU_Cliques& hc, CPU_Data& hd, Vertex* read_vertices, int tot_vert, int num_mem, int num_cand, uint64_t start)
 {
@@ -1245,38 +1245,38 @@ int h_lookahead_pruning(CPU_Graph& hg, CPU_Cliques& hc, CPU_Data& hd, Vertex* re
     bool lookahead_sucess;
 
     // initialize vertex order map
-    for (int i = num_mem; i < tot_vert; i++) {
+    for (int i = 0; i < tot_vert; i++) {
         hd.vertex_order_map[read_vertices[start + i].vertexid] = i;
     }
 
     // reset lvl2adj
-    for (int i = num_mem; i < tot_vert; i++) {
+    for (int i = 0; i < tot_vert; i++) {
         read_vertices[start + i].lvl2adj = 0;
     }
 
     // update lvl2adj to candidates for all vertices
-    for (int i = num_mem; i < tot_vert; i++) {
+    for (int i = 0; i < tot_vert; i++) {
         pvertexid = read_vertices[start + i].vertexid;
         pneighbors_start = hg.twohop_offsets[pvertexid];
         pneighbors_end = hg.twohop_offsets[pvertexid + 1];
-        for (int j = pneighbors_start; i < pneighbors_end; i++) {
-            phelper1 = hd.vertex_order_map[hg.twohop_neighbors[i]];
+        for (int j = pneighbors_start; j < pneighbors_end; j++) {
+            phelper1 = hd.vertex_order_map[hg.twohop_neighbors[j]];
 
-            if (phelper1 >= num_mem) {
+            if (phelper1 >= 0) {
                 read_vertices[start + phelper1].lvl2adj++;
             }
         }
     }
 
     // reset vertex order map
-    for (int i = num_mem; i < tot_vert; i++) {
+    for (int i = 0; i < tot_vert; i++) {
         hd.vertex_order_map[read_vertices[start + i].vertexid] = -1;
     }
 
     // check for lookahead
     lookahead_sucess = true;
-    for (int j = num_mem; j < tot_vert; j++) {
-        if (read_vertices[start + j].lvl2adj != num_cand - 1 || read_vertices[start + j].indeg + read_vertices[start + j].exdeg < minimum_degrees[tot_vert]) {
+    for (int j = 0; j < tot_vert; j++) {
+        if (read_vertices[start + j].lvl2adj < tot_vert - 1 || read_vertices[start + j].indeg + read_vertices[start + j].exdeg < minimum_degrees[tot_vert]) {
             lookahead_sucess = false;
             break;
         }
@@ -1363,7 +1363,6 @@ int h_add_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_v
 {
     // helper variables
     bool method_return;
-    int start_total;
 
     // intersection
     int pvertexid;
@@ -1403,16 +1402,6 @@ int h_add_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_v
 
     // DIAMETER PRUNING
     //h_diameter_pruning(hg, hd, vertices, pvertexid, total_vertices, number_of_candidates, number_of_members);
-
-    // commenting out, has to go after degree when degree is updated
-    if (false){
-        for (int i = 0; i < (*hd.remaining_count); i++) {
-            vertices[number_of_members + i] = vertices[hd.vertex_order_map[hd.remaining_candidates[i]]];
-        }
-
-        total_vertices = total_vertices - number_of_candidates + (*hd.remaining_count);
-        number_of_candidates = (*hd.remaining_count);
-    }
 
     // continue if not enough vertices after pruning
     if (total_vertices < minimum_clique_size) {
@@ -1620,6 +1609,10 @@ void h_diameter_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int pvert
         }
     }
 
+    for (int i = 0; i < (*hd.remaining_count); i++) {
+        //cout << hd.remaining_candidates[i] << endl;
+    }
+
     for (int i = 0; i < total_vertices; i++) {
         vertices[i].exdeg = 0;
     }
@@ -1643,6 +1636,8 @@ void h_diameter_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int pvert
 
     total_vertices = total_vertices - number_of_candidates + (*hd.remaining_count);
     number_of_candidates = (*hd.remaining_count);
+
+    //print_vertices(vertices, total_vertices);
 }
 
 // returns true is invalid bounds calculated or a failed vertex was found, else false
@@ -2017,10 +2012,10 @@ inline int h_sort_vert(const void* a, const void* b)
 
     else if ((*(Vertex*)a).label == 0 && (*(Vertex*)b).label == 0) {
         if ((*(Vertex*)a).vertexid > (*(Vertex*)b).vertexid) {
-            return -1;
+            return 1;
         }
         else if ((*(Vertex*)a).vertexid < (*(Vertex*)b).vertexid) {
-            return 1;
+            return -1;
         }
         else {
             return 0;
