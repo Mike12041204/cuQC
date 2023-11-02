@@ -25,7 +25,7 @@ using namespace std;
 
 // global memory size: 1.500.000.000 ints
 #define TASKS_SIZE 2000000
-#define EXPAND_THRESHOLD 528
+#define EXPAND_THRESHOLD 5280
 #define BUFFER_SIZE 100000000
 #define BUFFER_OFFSET_SIZE 1000000
 #define CLIQUES_SIZE 2000000
@@ -49,7 +49,7 @@ using namespace std;
 #define WARP_SIZE 32
 
 // run settings
-#define CPU_LEVELS_x2 200
+#define CPU_LEVELS_x2 10000
 
 // VERTEX DATA
 struct Vertex
@@ -340,18 +340,21 @@ int h_lookahead_pruning(CPU_Graph& hg, CPU_Cliques& hc, CPU_Data& hd, Vertex* re
 int h_remove_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* read_vertices, int& tot_vert, int& num_cand, int& num_vert, uint64_t start);
 int h_add_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_vertices, int& number_of_candidates, int& number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg);
 void h_diameter_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int pvertexid, int& total_vertices, int& number_of_candidates, int number_of_members);
-bool h_degree_pruning(CPU_Graph& hg, Vertex* vertices, int& total_vertices, int& number_of_candidates, int number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg);
-bool h_calculate_LU_bounds(int& upper_bound, int& lower_bound, int& min_ext_deg, Vertex* vertices, int number_of_members, int number_of_candidates);
+bool h_degree_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_vertices, int& number_of_candidates, int number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg);
+bool h_calculate_LU_bounds(CPU_Data& hd, int& upper_bound, int& lower_bound, int& min_ext_deg, Vertex* vertices, int number_of_members, int number_of_candidates);
 void h_update_degrees(CPU_Graph& hg, Vertex* vertices, int total_vertices, int number_of_removed);
 void h_check_for_clique(CPU_Cliques& hc, Vertex* vertices, int number_of_members);
-int h_critical_vertex_pruning(CPU_Graph& hg, Vertex* vertices, int& total_vertices, int& number_of_candidates, int& number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg);
+int h_critical_vertex_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_vertices, int& number_of_candidates, int& number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg);
 void h_write_to_tasks(CPU_Data& hd, Vertex* vertices, int total_vertices, Vertex* write_vertices, uint64_t* write_offsets, uint64_t* write_count);
 void h_fill_from_buffer(CPU_Data& hd, Vertex* write_vertices, uint64_t* write_offsets, uint64_t* write_count);
+
+bool h_calculate_LU_bounds_old(CPU_Data& hd, int& upper_bound, int& lower_bound, int& min_ext_deg, Vertex* vertices, int number_of_members, int number_of_candidates);
 
 int h_bsearch_array(int* search_array, int array_size, int search_number);
 int h_lsearch_vert(Vertex* search_array, int array_size, int search_vertexid);
 int h_sort_vert(const void* a, const void* b);
 int h_sort_vert_LU(const void* a, const void* b);
+int h_sort_degs(const void* a, const void* b);
 inline int h_get_mindeg(int clique_size);
 inline bool h_cand_isvalid(Vertex vertex, int clique_size);
 inline bool h_cand_isvalid_LU(Vertex vertex, int clique_size, int upper_bound, int lower_bound, int min_ext_deg);
@@ -1053,7 +1056,7 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc)
 
 
             // CRITICAL VERTEX PRUNING
-            method_return = h_critical_vertex_pruning(hg, vertices, total_vertices, number_of_candidates, number_of_members, upper_bound, lower_bound, min_ext_deg);
+            //method_return = h_critical_vertex_pruning(hg, hd, vertices, total_vertices, number_of_candidates, number_of_members, upper_bound, lower_bound, min_ext_deg);
 
             // continue if not enough vertices after pruning
             if (method_return == 2) {
@@ -1407,19 +1410,10 @@ int h_add_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_v
     // DIAMETER PRUNING
     h_diameter_pruning(hg, hd, vertices, pvertexid, total_vertices, number_of_candidates, number_of_members);
 
-    // continue if not enough vertices after pruning
-    if (total_vertices < minimum_clique_size) {
-        for (int i = 0; i < hg.number_of_vertices; i++) {
-            hd.vertex_order_map[i] = -1;
-        }
-
-        return 2;
-    }
-
 
 
     // DEGREE-BASED PRUNING
-    method_return = h_degree_pruning(hg, vertices, total_vertices, number_of_candidates, number_of_members, upper_bound, lower_bound, min_ext_deg);
+    method_return = h_degree_pruning(hg, hd, vertices, total_vertices, number_of_candidates, number_of_members, upper_bound, lower_bound, min_ext_deg);
 
     for (int i = 0; i < hg.number_of_vertices; i++) {
         hd.vertex_order_map[i] = -1;
@@ -1439,7 +1433,7 @@ int h_add_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_v
 }
 
 // returns 2 if too many vertices pruned or a critical vertex fail, returns 1 if failed found or invalid bounds, else 0
-int h_critical_vertex_pruning(CPU_Graph& hg, Vertex* vertices, int& total_vertices, int& number_of_candidates, int& number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg)
+int h_critical_vertex_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_vertices, int& number_of_candidates, int& number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg)
 {
     // intersection
     int pvertexid;
@@ -1576,7 +1570,7 @@ int h_critical_vertex_pruning(CPU_Graph& hg, Vertex* vertices, int& total_vertic
 
 
     // DEGREE-BASED PRUNING
-    method_return = h_degree_pruning(hg, vertices, total_vertices, number_of_candidates, number_of_members, upper_bound, lower_bound, min_ext_deg);
+    method_return = h_degree_pruning(hg, hd, vertices, total_vertices, number_of_candidates, number_of_members, upper_bound, lower_bound, min_ext_deg);
 
     // continue if not enough vertices after pruning
     if (total_vertices < minimum_clique_size) {
@@ -1629,69 +1623,221 @@ void h_diameter_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int pvert
             }
         }
     }
+}
+
+// returns true is invalid bounds calculated or a failed vertex was found, else false
+bool h_degree_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_vertices, int& number_of_candidates, int number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg)
+{
+    // intersection
+    int pvertexid;
+    uint64_t pneighbors_start;
+    uint64_t pneighbors_end;
+    int pneighbors_count;
+    int phelper1;
+    int phelper2;
+
+    // helper variables
+    bool invalid_bounds = false;
+    bool failed_found = false;
+
+    // iteratively do degree pruning while something has been pruned
+    do {
+        total_vertices = total_vertices - number_of_candidates + (*hd.remaining_count);
+        number_of_candidates = (*hd.remaining_count);
+
+        (*hd.remaining_count) = 0;
+        (*hd.removed_count) = 0;
+
+        qsort(hd.candidate_indegs, number_of_candidates, sizeof(int), h_sort_degs);
+
+        // if invalid bounds found while calculating lower and upper bounds
+        if (h_calculate_LU_bounds(hd, upper_bound, lower_bound, min_ext_deg, vertices, number_of_members, number_of_candidates)) {
+            return true;
+        }
+
+        // check for failed vertices
+        for (int k = 0; k < number_of_members; k++) {
+            if (!h_vert_isextendable_LU(vertices[k], number_of_members, upper_bound, lower_bound, min_ext_deg)) {
+                return true;
+            }
+        }
+
+        // check for invalid candidates
+        for (int k = 0; k < number_of_candidates; k++) {
+            pvertexid = hd.remaining_candidates[k];
+            if (h_cand_isvalid_LU(vertices[hd.vertex_order_map[pvertexid]], number_of_members, upper_bound, lower_bound, min_ext_deg)) {
+                hd.candidate_indegs[(*hd.remaining_count)] = vertices[hd.vertex_order_map[pvertexid]].indeg;
+                hd.remaining_candidates[(*hd.remaining_count)++] = pvertexid;
+            }
+            else {
+                hd.removed_candidates[(*hd.removed_count)++] = pvertexid;
+            }
+        }
+
+        // update degrees
+        if ((*hd.remaining_count) < (*hd.removed_count)) {
+            // reset exdegs
+            for (int i = 0; i < number_of_members; i++) {
+                vertices[i].exdeg = 0;
+            }
+            for (int i = 0; i < number_of_candidates; i++) {
+                vertices[hd.vertex_order_map[hd.remaining_candidates[i]]].exdeg = 0;
+            }
+
+            for (int i = 0; i < (*hd.remaining_count); i++) {
+                pvertexid = hd.remaining_candidates[i];
+                pneighbors_start = hg.onehop_offsets[pvertexid];
+                pneighbors_end = hg.onehop_offsets[pvertexid + 1];
+                for (int j = pneighbors_start; j < pneighbors_end; j++) {
+                    phelper1 = hd.vertex_order_map[hg.onehop_neighbors[j]];
+
+                    if (phelper1 > -1) {
+                        vertices[phelper1].exdeg++;
+                    }
+                }
+            }
+        }
+        else {
+            for (int i = 0; i < (*hd.removed_count); i++) {
+                pvertexid = hd.removed_candidates[i];
+                pneighbors_start = hg.onehop_offsets[pvertexid];
+                pneighbors_end = hg.onehop_offsets[pvertexid + 1];
+                for (int j = pneighbors_start; j < pneighbors_end; j++) {
+                    phelper1 = hd.vertex_order_map[hg.onehop_neighbors[j]];
+
+                    if (phelper1 > -1) {
+                        vertices[phelper1].exdeg--;
+                    }
+                }
+            }
+        }
+    } while ((*hd.remaining_count) < number_of_candidates);
 
     for (int i = 0; i < (*hd.remaining_count); i++) {
         vertices[number_of_members + i] = vertices[hd.vertex_order_map[hd.remaining_candidates[i]]];
     }
 
-    total_vertices = total_vertices - number_of_candidates + (*hd.remaining_count);
-    number_of_candidates = (*hd.remaining_count);
-}
-
-// returns true is invalid bounds calculated or a failed vertex was found, else false
-bool h_degree_pruning(CPU_Graph& hg, Vertex* vertices, int& total_vertices, int& number_of_candidates, int number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg)
-{
-    // helper variables
-    int number_of_removed;
-    bool invalid_bounds = false;
-    bool failed_found = false;
-
-    do
-    {
-        // calculate lower and upper bounds
-        qsort(vertices, total_vertices, sizeof(Vertex), h_sort_vert_LU);
-        invalid_bounds = h_calculate_LU_bounds(upper_bound, lower_bound, min_ext_deg, vertices, number_of_members, number_of_candidates);
-
-        if (invalid_bounds) {
-            break;
-        }
-
-        // check for failed vertices
-        for (int k = 0; k < number_of_members; k++) {
-            if (! h_vert_isextendable_LU(vertices[k], number_of_members, upper_bound, lower_bound, min_ext_deg)) {
-                failed_found = true;
-                break;
-            }
-        }
-
-        if (failed_found) {
-            break;
-        }
-
-        // remove cands that do not meet the deg requirement
-        number_of_removed = 0;
-        for (int k = number_of_members; k < total_vertices; k++) {
-            if (! h_cand_isvalid_LU(vertices[k], number_of_members, upper_bound, lower_bound, min_ext_deg)) {
-                vertices[k].label = -1;
-                number_of_removed++;
-            }
-        }
-        qsort(vertices, total_vertices, sizeof(Vertex), h_sort_vert);
-
-        h_update_degrees(hg, vertices, total_vertices, number_of_removed);
-
-        total_vertices -= number_of_removed;
-        number_of_candidates -= number_of_removed;
-    } while (number_of_removed > 0);
-
-    if (failed_found || invalid_bounds) {
-        return true;
-    }
-
     return false;
 }
 
-bool h_calculate_LU_bounds(int& upper_bound, int& lower_bound, int& min_ext_deg, Vertex* vertices, int number_of_members, int number_of_candidates)
+bool h_calculate_LU_bounds(CPU_Data& hd, int& upper_bound, int& lower_bound, int& min_ext_deg, Vertex* vertices, int number_of_members, int number_of_candidates)
+{
+    bool invalid_bounds = false;
+    int index;
+
+    int sum_candidate_indeg = 0;
+    int tightened_upper_bound = 0;
+
+    int min_clq_indeg = vertices[0].indeg;
+    int min_indeg_exdeg = vertices[0].exdeg;
+    int min_clq_totaldeg = vertices[0].indeg + vertices[0].exdeg;
+    int sum_clq_indeg = vertices[0].indeg;
+
+    for (index = 1; index < number_of_members; index++) {
+        sum_clq_indeg += vertices[index].indeg;
+
+        if (vertices[index].indeg < min_clq_indeg) {
+            min_clq_indeg = vertices[index].indeg;
+            min_indeg_exdeg = vertices[index].exdeg;
+        }
+        else if (vertices[index].indeg == min_clq_indeg) {
+            if (vertices[index].exdeg < min_indeg_exdeg) {
+                min_indeg_exdeg = vertices[index].exdeg;
+            }
+        }
+
+        if (vertices[index].indeg + vertices[index].exdeg < min_clq_totaldeg) {
+            min_clq_totaldeg = vertices[index].indeg + vertices[index].exdeg;
+        }
+    }
+
+    min_ext_deg = h_get_mindeg(number_of_members + 1);
+
+    if (min_clq_indeg < minimum_degrees[number_of_members])
+    {
+        // lower
+        lower_bound = h_get_mindeg(number_of_members) - min_clq_indeg;
+
+        while (lower_bound <= min_indeg_exdeg && min_clq_indeg + lower_bound < minimum_degrees[number_of_members + lower_bound]) {
+            lower_bound++;
+        }
+
+        if (min_clq_indeg + lower_bound < minimum_degrees[number_of_members + lower_bound]) {
+            lower_bound = number_of_candidates + 1;
+            invalid_bounds = true;
+        }
+
+        // upper
+        upper_bound = floor(min_clq_totaldeg / minimum_degree_ratio) + 1 - number_of_members;
+
+        if (upper_bound > number_of_candidates) {
+            upper_bound = number_of_candidates;
+        }
+
+        // tighten
+        if (lower_bound < upper_bound) {
+            // tighten lower
+            for (index = 0; index < lower_bound; index++) {
+                sum_candidate_indeg += hd.candidate_indegs[index];
+            }
+
+            while (index < upper_bound && sum_clq_indeg + sum_candidate_indeg < number_of_members * minimum_degrees[number_of_members + index]) {
+                sum_candidate_indeg += hd.candidate_indegs[index];
+                index++;
+            }
+
+            if (sum_clq_indeg + sum_candidate_indeg < number_of_members * minimum_degrees[number_of_members + index]) {
+                lower_bound = upper_bound + 1;
+                invalid_bounds = true;
+            }
+            else {
+                lower_bound = index;
+
+                tightened_upper_bound = index;
+
+                while (index < upper_bound) {
+                    sum_candidate_indeg += hd.candidate_indegs[index];
+
+                    index++;
+
+                    if (sum_clq_indeg + sum_candidate_indeg >= number_of_members * minimum_degrees[number_of_members + index]) {
+                        tightened_upper_bound = index;
+                    }
+                }
+
+                if (upper_bound > tightened_upper_bound) {
+                    upper_bound = tightened_upper_bound;
+                }
+
+                if (lower_bound > 1) {
+                    min_ext_deg = h_get_mindeg(number_of_members + lower_bound);
+                }
+            }
+        }
+    }
+    else {
+        upper_bound = number_of_candidates;
+
+        if (number_of_members < minimum_clique_size) {
+            lower_bound = minimum_clique_size - number_of_members;
+        }
+        else {
+            lower_bound = 0;
+        }
+    }
+
+    if (number_of_members + upper_bound < minimum_clique_size) {
+        invalid_bounds = true;
+    }
+
+    if (upper_bound < 0 || upper_bound < lower_bound) {
+        invalid_bounds = true;
+    }
+
+    return invalid_bounds;
+}
+
+bool h_calculate_LU_bounds_old(CPU_Data& hd, int& upper_bound, int& lower_bound, int& min_ext_deg, Vertex* vertices, int number_of_members, int number_of_candidates)
 {
     bool invalid_bounds = false;
     int index;
@@ -1954,7 +2100,7 @@ int h_lsearch_vert(Vertex* search_array, int array_size, int search_vertexid) {
     return -1;
 }
 
-inline int h_sort_vert(const void* a, const void* b)
+int h_sort_vert(const void* a, const void* b)
 {
     // order is: in clique -> covered -> critical adj vertices -> cands -> cover -> pruned
 
@@ -2028,7 +2174,7 @@ inline int h_sort_vert(const void* a, const void* b)
     return 0;
 }
 
-inline int h_sort_vert_LU(const void* a, const void* b)
+int h_sort_vert_LU(const void* a, const void* b)
 {
     // order is: in clique -> covered -> crtical adjacent -> cands -> cover -> pruned
 
@@ -2110,6 +2256,26 @@ inline int h_sort_vert_LU(const void* a, const void* b)
         return 0;
     }
     return 0;
+}
+
+// sorts degrees in descending order
+int h_sort_degs(const void* a, const void* b) 
+{
+    int n1;
+    int n2;
+
+    n1 = *(int*)a;
+    n2 = *(int*)b;
+
+    if (n1 > n2) {
+        return -1;
+    }
+    else if (n1 < n2) {
+        return 1;
+    }
+    else {
+        return 0;
+    }
 }
 
 inline int h_get_mindeg(int clique_size) {
