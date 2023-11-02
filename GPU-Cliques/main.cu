@@ -1401,7 +1401,7 @@ int h_add_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_v
 
 
     // DIAMETER PRUNING
-    //h_diameter_pruning(hg, hd, vertices, pvertexid, total_vertices, number_of_candidates, number_of_members);
+    h_diameter_pruning(hg, hd, vertices, pvertexid, total_vertices, number_of_candidates, number_of_members);
 
     // continue if not enough vertices after pruning
     if (total_vertices < minimum_clique_size) {
