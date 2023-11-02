@@ -1235,7 +1235,6 @@ void free_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc)
 
 // --- HOST EXPANSION METHODS ---
 
-// CURSOR - doesnt work when only considering candidates, x should have property of being 2hop from all and meeting deg req, but maybe not diam isnt working first, so fix that first
 // returns 1 if lookahead was a success, else 0
 int h_lookahead_pruning(CPU_Graph& hg, CPU_Cliques& hc, CPU_Data& hd, Vertex* read_vertices, int tot_vert, int num_mem, int num_cand, uint64_t start)
 {
@@ -1247,59 +1246,59 @@ int h_lookahead_pruning(CPU_Graph& hg, CPU_Cliques& hc, CPU_Data& hd, Vertex* re
     int phelper1;
     int phelper2;
 
-    bool lookahead_sucess;
+
+    // check if members meet degree requirement, dont need to check 2hop adj as diameter pruning guarentees all members will be within 2hops of eveything
+    for (int i = 0; i < num_mem; i++) {
+        if (read_vertices[start + i].indeg + read_vertices[start + i].exdeg < minimum_degrees[tot_vert]) {
+            return 0;
+        }
+    }
 
     // initialize vertex order map
-    for (int i = 0; i < tot_vert; i++) {
+    for (int i = num_mem; i < tot_vert; i++) {
         hd.vertex_order_map[read_vertices[start + i].vertexid] = i;
     }
 
     // reset lvl2adj
-    for (int i = 0; i < tot_vert; i++) {
+    for (int i = num_mem; i < tot_vert; i++) {
         read_vertices[start + i].lvl2adj = 0;
     }
 
     // update lvl2adj to candidates for all vertices
-    for (int i = 0; i < tot_vert; i++) {
+    for (int i = num_mem; i < tot_vert; i++) {
         pvertexid = read_vertices[start + i].vertexid;
         pneighbors_start = hg.twohop_offsets[pvertexid];
         pneighbors_end = hg.twohop_offsets[pvertexid + 1];
         for (int j = pneighbors_start; j < pneighbors_end; j++) {
             phelper1 = hd.vertex_order_map[hg.twohop_neighbors[j]];
 
-            if (phelper1 >= 0) {
+            if (phelper1 >= num_mem) {
                 read_vertices[start + phelper1].lvl2adj++;
             }
         }
     }
 
     // reset vertex order map
-    for (int i = 0; i < tot_vert; i++) {
+    for (int i = num_mem; i < tot_vert; i++) {
         hd.vertex_order_map[read_vertices[start + i].vertexid] = -1;
     }
 
     // check for lookahead
-    lookahead_sucess = true;
+    for (int j = num_mem; j < tot_vert; j++) {
+        if (read_vertices[start + j].lvl2adj < num_cand - 1 || read_vertices[start + j].indeg + read_vertices[start + j].exdeg < minimum_degrees[tot_vert]) {
+            return 0;
+        }
+    }
+
+    // write to cliques
+    uint64_t start_write = hc.cliques_offset[(*hc.cliques_count)];
     for (int j = 0; j < tot_vert; j++) {
-        if (read_vertices[start + j].lvl2adj < tot_vert - 1 || read_vertices[start + j].indeg + read_vertices[start + j].exdeg < minimum_degrees[tot_vert]) {
-            lookahead_sucess = false;
-            break;
-        }
+        hc.cliques_vertex[start_write + j] = read_vertices[start + j].vertexid;
     }
+    (*hc.cliques_count)++;
+    hc.cliques_offset[(*hc.cliques_count)] = start_write + tot_vert;
 
-    if (lookahead_sucess) {
-        // write to cliques
-        uint64_t start_write = hc.cliques_offset[(*hc.cliques_count)];
-        for (int j = 0; j < tot_vert; j++) {
-            hc.cliques_vertex[start_write + j] = read_vertices[start + j].vertexid;
-        }
-        (*hc.cliques_count)++;
-        hc.cliques_offset[(*hc.cliques_count)] = start_write + tot_vert;
-
-        return 1;
-    }
-
-    return 0;
+    return 1;
 }
 
 // returns 1 is failed found or not enough vertices, else 0
