@@ -1021,9 +1021,14 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc)
                 vertices[index + 1] = read_vertices[start + index];
             }
 
-            // set all covered vertices from previous level as candidates
-            for (int j = num_mem + 1; j <= num_mem + number_of_covered; j++) {
-                vertices[j].label = 0;
+            if (number_of_covered > 0) {
+                // set all covered vertices from previous level as candidates
+                for (int j = num_mem + 1; j <= num_mem + number_of_covered; j++) {
+                    vertices[j].label = 0;
+                }
+
+                // sort vertices so that newly added covered candidates are in correct enumeration order as other candidates needed for pruning also
+                qsort(vertices + number_of_members + 1, number_of_candidates - 1, sizeof(Vertex), h_sort_vert);
             }
 
 
@@ -1605,12 +1610,8 @@ void h_diameter_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int pvert
 
         if (phelper1 >= number_of_members) {
             hd.candidate_indegs[(*hd.remaining_count)] = vertices[phelper1].indeg;
-            hd.remaining_candidates[(*hd.remaining_count)++] = vertices[phelper1].vertexid;
+            hd.remaining_candidates[(*hd.remaining_count)++] = hg.twohop_neighbors[i];
         }
-    }
-
-    for (int i = 0; i < (*hd.remaining_count); i++) {
-        //cout << hd.remaining_candidates[i] << endl;
     }
 
     for (int i = 0; i < total_vertices; i++) {
@@ -1636,8 +1637,6 @@ void h_diameter_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int pvert
 
     total_vertices = total_vertices - number_of_candidates + (*hd.remaining_count);
     number_of_candidates = (*hd.remaining_count);
-
-    //print_vertices(vertices, total_vertices);
 }
 
 // returns true is invalid bounds calculated or a failed vertex was found, else false
