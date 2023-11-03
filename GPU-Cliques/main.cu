@@ -25,7 +25,7 @@ using namespace std;
 
 // global memory size: 1.500.000.000 ints
 #define TASKS_SIZE 2000000
-#define EXPAND_THRESHOLD 5280
+#define EXPAND_THRESHOLD 528
 #define BUFFER_SIZE 100000000
 #define BUFFER_OFFSET_SIZE 1000000
 #define CLIQUES_SIZE 2000000
@@ -410,6 +410,11 @@ __device__ bool d_vert_isextendable_LU(Vertex& vertex, GPU_Data& dd, Warp_Data& 
 __device__ int d_get_mindeg(int number_of_members, GPU_Data& dd);
 
 
+
+// refer to Quick
+// decreasung order
+// crit vert pruning
+// test speed and correctness
 
 // vertex order mp on the cpu
 // vertex order map on gpu
@@ -1319,11 +1324,6 @@ int h_remove_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* read_vertices, int&
 
     bool failed_found = false;
 
-    // break if not enough vertices as only less will be added in the next iteration
-    if (tot_vert - 1 < minimum_clique_size) {
-        return 1;
-    }
-
     // TODO - change vert is extendable to Quick check using mindeg
     mindeg = h_get_mindeg(num_mem);
 
@@ -1346,7 +1346,7 @@ int h_remove_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* read_vertices, int&
         if (phelper1 > -1) {
             read_vertices[start + phelper1].exdeg--;
 
-            if (phelper1 < num_mem && ! h_vert_isextendable(read_vertices[start + phelper1], num_mem)) {
+            if (phelper1 < num_mem && read_vertices[start + phelper1].indeg + read_vertices[start + phelper1].exdeg < mindeg) {
                 failed_found = true;
                 break;
             }
@@ -1417,11 +1417,6 @@ int h_add_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_v
 
     for (int i = 0; i < hg.number_of_vertices; i++) {
         hd.vertex_order_map[i] = -1;
-    }
-
-    // continue if not enough vertices after pruning
-    if (total_vertices < minimum_clique_size) {
-        return 2;
     }
 
     // if vertex in x found as not extendable, check if current set is clique and continue to next iteration
@@ -1625,6 +1620,7 @@ void h_diameter_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int pvert
     }
 }
 
+// CURSOR - change order to how Quick does it, serpeate diam pruning so that condensing can be done in place even when enumeration order is different than ascending
 // returns true is invalid bounds calculated or a failed vertex was found, else false
 bool h_degree_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_vertices, int& number_of_candidates, int number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg)
 {
@@ -2098,6 +2094,80 @@ int h_lsearch_vert(Vertex* search_array, int array_size, int search_vertexid) {
         }
     }
     return -1;
+}
+
+int h_sort_vert(const void* a, const void* b)
+{
+    // order is: in clique -> covered -> critical adj vertices -> cands -> cover -> pruned
+
+    // in clique
+    if ((*(Vertex*)a).label == 1 && (*(Vertex*)b).label != 1) {
+        return -1;
+    }
+    else if ((*(Vertex*)a).label != 1 && (*(Vertex*)b).label == 1) {
+        return 1;
+
+        // covered candidate vertices
+    }
+    else if ((*(Vertex*)a).label == 2 && (*(Vertex*)b).label != 2) {
+        return -1;
+    }
+    else if ((*(Vertex*)a).label != 2 && (*(Vertex*)b).label == 2) {
+        return 1;
+
+        // critical adjacent candidate vertices
+    }
+    else if ((*(Vertex*)a).label == 4 && (*(Vertex*)b).label != 4) {
+        return -1;
+    }
+    else if ((*(Vertex*)a).label != 4 && (*(Vertex*)b).label == 4) {
+        return 1;
+
+        // candidate vertices
+    }
+    else if ((*(Vertex*)a).label == 0 && (*(Vertex*)b).label != 0) {
+        return -1;
+    }
+    else if ((*(Vertex*)a).label != 0 && (*(Vertex*)b).label == 0) {
+        return 1;
+
+        // the cover vertex
+    }
+    else if ((*(Vertex*)a).label == 3 && (*(Vertex*)b).label != 3) {
+        return -1;
+    }
+    else if ((*(Vertex*)a).label != 3 && (*(Vertex*)b).label == 3) {
+        return 1;
+
+        // vertices that have been pruned
+    }
+    else if ((*(Vertex*)a).label == -1 && (*(Vertex*)b).label != 1) {
+        return 1;
+    }
+    else if ((*(Vertex*)a).label != -1 && (*(Vertex*)b).label == -1) {
+        return -1;
+    }
+
+    // for ties: in cand low -> high
+
+    else if ((*(Vertex*)a).label == 0 && (*(Vertex*)b).label == 0) {
+        if ((*(Vertex*)a).vertexid > (*(Vertex*)b).vertexid) {
+            return 1;
+        }
+        else if ((*(Vertex*)a).vertexid < (*(Vertex*)b).vertexid) {
+            return -1;
+        }
+        else {
+            return 0;
+        }
+    }
+    else if ((*(Vertex*)a).label == 2 && (*(Vertex*)b).label == 2) {
+        return 0;
+    }
+    else if ((*(Vertex*)a).label == -1 && (*(Vertex*)b).label == -1) {
+        return 0;
+    }
+    return 0;
 }
 
 int h_sort_vert(const void* a, const void* b)
