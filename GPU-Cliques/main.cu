@@ -353,6 +353,7 @@ bool h_calculate_LU_bounds_old(CPU_Data& hd, int& upper_bound, int& lower_bound,
 int h_bsearch_array(int* search_array, int array_size, int search_number);
 int h_lsearch_vert(Vertex* search_array, int array_size, int search_vertexid);
 int h_sort_vert(const void* a, const void* b);
+int h_sort_vert_Q(const void* a, const void* b);
 int h_sort_vert_LU(const void* a, const void* b);
 int h_sort_degs(const void* a, const void* b);
 inline int h_get_mindeg(int clique_size);
@@ -2170,7 +2171,7 @@ int h_sort_vert(const void* a, const void* b)
     return 0;
 }
 
-int h_sort_vert(const void* a, const void* b)
+int h_sort_vert_Q(const void* a, const void* b)
 {
     // order is: in clique -> covered -> critical adj vertices -> cands -> cover -> pruned
 
