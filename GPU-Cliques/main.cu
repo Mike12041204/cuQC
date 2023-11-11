@@ -25,7 +25,7 @@ using namespace std;
 
 // global memory size: 1.500.000.000 ints
 #define TASKS_SIZE 2000000
-#define EXPAND_THRESHOLD 528
+#define EXPAND_THRESHOLD 5280
 #define BUFFER_SIZE 100000000
 #define BUFFER_OFFSET_SIZE 1000000
 #define CLIQUES_SIZE 2000000
@@ -443,6 +443,7 @@ __device__ int d_get_mindeg(int number_of_members, GPU_Data& dd);
 // - improve host critical vertex pruning like gpu version
 // - when working on larger data sets try removing return 2 from aov and see if it makes a difference
 // - update initialize tasks to make use of new strategies
+// - change write to tasks to set lvl2adj to 0
 
 // TODO (LOW PRIORITY)
 // - reevaluate and change where uint64_t's are used
@@ -556,7 +557,7 @@ void search(CPU_Graph& hg, ofstream& temp_results)
 
     // DEBUG
     h_print_Data_Sizes(hd, hc);
-    //print_CPU_Data(hd);
+    print_CPU_Data(hd);
 
     // CPU EXPANSION
     // cpu levels is multiplied by two to ensure that data ends up in tasks1, this allows us to always copy tasks1 without worry like before hybrid cpu approach
@@ -797,114 +798,140 @@ void initialize_tasks(CPU_Graph& hg, CPU_Data& hd)
     int pvertexid;
     uint64_t pneighbors_start;
     uint64_t pneighbors_end;
-    int pneighbors_count;
     int phelper1;
-    int phelper2;
 
     // cover pruning
-    int number_of_covered_vertices;
     int maximum_degree;
     int maximum_degree_index;
-
-    // degree pruning
-    int number_of_removed;
 
     // vertices information
     int expansions;
     int total_vertices;
+    int number_of_candidates;
     Vertex* vertices;
 
 
 
+    (*hd.remaining_count) = 0;
+    (*hd.removed_count) = 0;
+
     // initialize vertices
     total_vertices = hg.number_of_vertices;
     vertices = new Vertex[total_vertices];
+    number_of_candidates = total_vertices;
     for (int i = 0; i < total_vertices; i++) {
         vertices[i].vertexid = i;
-        vertices[i].label = 0;
         vertices[i].indeg = 0;
         vertices[i].exdeg = hg.onehop_offsets[i + 1] - hg.onehop_offsets[i];
         vertices[i].lvl2adj = hg.twohop_offsets[i + 1] - hg.twohop_offsets[i];
+        if (vertices[i].exdeg >= minimum_degrees[minimum_clique_size] && vertices[i].lvl2adj >= minimum_clique_size - 1) {
+            vertices[i].label = 0;
+            hd.remaining_candidates[(*hd.remaining_count)++] = i;
+        }
+        else {
+            vertices[i].label = -1;
+            hd.removed_candidates[(*hd.removed_count)++] = i;
+        }
     }
 
 
-    // TODO - update based on how Quick does this
+
     // DEGREE-BASED PRUNING
-    do {
-        // remove cands that do not meet the deg requirement
-        number_of_removed = 0;
-        for (int i = 0; i < total_vertices; i++) {
-            if (! h_cand_isvalid(vertices[i], 0)) {
-                vertices[i].label = -1;
-                number_of_removed++;
-            }
+    // update while half of vertices have been removed
+    while ((*hd.remaining_count) < number_of_candidates / 2) {
+        number_of_candidates = (*hd.remaining_count);
+        
+        for (int i = 0; i < number_of_candidates; i++) {
+            vertices[hd.remaining_candidates[i]].exdeg = 0;
         }
-        qsort(vertices, total_vertices, sizeof(Vertex), h_sort_vert);
 
-        for (int i = 0; i < total_vertices - number_of_removed; i++) {
-            pvertexid = vertices[i].vertexid;
-            for (int j = total_vertices - number_of_removed; j < total_vertices; j++) {
-                phelper1 = vertices[j].vertexid;
-                pneighbors_start = hg.onehop_offsets[phelper1];
-                pneighbors_end = hg.onehop_offsets[phelper1 + 1];
-                pneighbors_count = pneighbors_end - pneighbors_start;
-                phelper2 = h_bsearch_array(hg.onehop_neighbors + pneighbors_start, pneighbors_count, pvertexid);
-                if (phelper2 != -1) {
-                    vertices[i].exdeg--;
-                }
-
-                pneighbors_start = hg.twohop_offsets[phelper1];
-                pneighbors_end = hg.twohop_offsets[phelper1 + 1];
-                pneighbors_count = pneighbors_end - pneighbors_start;
-                phelper2 = h_bsearch_array(hg.twohop_neighbors + pneighbors_start, pneighbors_count, pvertexid);
-                if (phelper2 != -1) {
-                    vertices[i].lvl2adj--;
+        for (int i = 0; i < number_of_candidates; i++) {
+            // in 0th level id is same as position in vertices as all vertices are in vertices, see last block
+            pvertexid = hd.remaining_candidates[i];
+            pneighbors_start = hg.onehop_offsets[pvertexid];
+            pneighbors_end = hg.onehop_offsets[pvertexid + 1];
+            for (int j = pneighbors_start; j < pneighbors_end; j++) {
+                phelper1 = hg.onehop_neighbors[j];
+                if (vertices[phelper1].label == 0) {
+                    vertices[phelper1].exdeg++;
                 }
             }
         }
-        total_vertices -= number_of_removed;
-    } while (number_of_removed > 0);
+
+        (*hd.remaining_count) = 0;
+        (*hd.removed_count) = 0;
+
+        // remove more vertices based on updated degrees
+        for (int i = 0; i < number_of_candidates; i++) {
+            phelper1 = hd.remaining_candidates[i];
+            if (vertices[phelper1].exdeg >= minimum_degrees[minimum_clique_size]) {
+                hd.remaining_candidates[(*hd.remaining_count)++] = phelper1;
+            }
+            else {
+                vertices[phelper1].label = -1;
+                hd.removed_candidates[(*hd.removed_count)++] = phelper1;
+            }
+        }
+    }
+    number_of_candidates = (*hd.remaining_count);
+
+    // update degrees based on last round of removed vertices
+    for (int i = 0; i < (*hd.removed_count); i++) {
+        pvertexid = hd.removed_candidates[i];
+        pneighbors_start = hg.onehop_offsets[pvertexid];
+        pneighbors_end = hg.onehop_offsets[pvertexid + 1];
+
+        for (int j = pneighbors_start; j < pneighbors_end; j++) {
+            phelper1 = hg.onehop_neighbors[j];
+
+            if (vertices[phelper1].label == 0) {
+                vertices[phelper1].exdeg--;
+
+                if (vertices[phelper1].exdeg < minimum_degrees[minimum_clique_size]) {
+                    vertices[phelper1].label = -1;
+                    number_of_candidates--;
+                    hd.remaining_candidates[(*hd.removed_count)++] = phelper1;
+                }
+            }
+        }
+    }
+
     
+    if (false) {
+        // FIRST ROUND COVER PRUNING
+        // find cover vertex
+        maximum_degree = 0;
+        maximum_degree_index = 0;
+        for (int i = 0; i < total_vertices; i++) {
+            if (vertices[i].label == 0) {
+                if (vertices[i].exdeg > maximum_degree) {
+                    maximum_degree = vertices[i].exdeg;
+                    maximum_degree_index = i;
+                }
+            }
+        }
+        vertices[maximum_degree_index].label = 3;
 
-
-    // TODO - update if Quick does this differently
-    // FIRST ROUND COVER PRUNING
-    maximum_degree = 0;
-    maximum_degree_index = 0;
-    for (int i = 0; i < total_vertices; i++) {
-        if (vertices[i].exdeg > maximum_degree) {
-            maximum_degree = vertices[i].exdeg;
-            maximum_degree_index = i;
+        // find all covered vertices
+        pneighbors_start = hg.onehop_offsets[maximum_degree_index];
+        pneighbors_end = hg.onehop_offsets[maximum_degree_index + 1];
+        for (int i = pneighbors_start; i < pneighbors_end; i++) {
+            pvertexid = hg.onehop_neighbors[i];
+            if (vertices[pvertexid].label == 0) {
+                vertices[pvertexid].label = 2;
+            }
         }
     }
-    vertices[maximum_degree_index].label = 3;
 
-    // set all neighbors of cover vertices as covered
-    pvertexid = vertices[maximum_degree_index].vertexid;
-    qsort(vertices, total_vertices, sizeof(Vertex), h_sort_vert);
-    number_of_covered_vertices = 0;
-    for (int i = 0; i < total_vertices-1; i++) {
-        phelper1 = vertices[i].vertexid;
-        pneighbors_start = hg.onehop_offsets[phelper1];
-        pneighbors_end = hg.onehop_offsets[phelper1 + 1];
-        pneighbors_count = pneighbors_end - pneighbors_start;
-        phelper2 = h_bsearch_array(hg.onehop_neighbors + pneighbors_start, pneighbors_count, pvertexid);
-        if (phelper2 != -1) {
-            vertices[i].label = 2;
-            number_of_covered_vertices++;
-        }
-    }
-    qsort(vertices, total_vertices, sizeof(Vertex), h_sort_vert);
+    // sort enumeration order before writing to tasks
+    qsort(vertices, total_vertices, sizeof(Vertex), h_sort_vert_Q);
+    total_vertices = number_of_candidates;
 
 
 
     // WRITE TO TASKS
-    // sort enumeration order before writing to tasks
-    qsort(vertices, total_vertices, sizeof(Vertex), h_sort_vert_Q);
-
     if (total_vertices > 0)
     {
-
         for (int j = 0; j < total_vertices; j++) {
             hd.tasks1_vertices[j].vertexid = vertices[j].vertexid;
             hd.tasks1_vertices[j].label = vertices[j].label;
@@ -3425,6 +3452,19 @@ __device__ int d_lookahead_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     bool lookahead_sucess;
     int pvertexid;
     int phelper1;
+
+    // check if members meet degree requirement, dont need to check 2hop adj as diameter pruning guarentees all members will be within 2hops of eveything
+    for (int i = (ld.idx % WARP_SIZE); i < wd.num_mem[ld.wib_idx]; i += WARP_SIZE) {
+        if (ld.read_vertices[wd.start[ld.wib_idx] + i].indeg + ld.read_vertices[wd.start[ld.wib_idx] + i].exdeg < dd.minimum_degrees[wd.tot_vert[ld.wib_idx]]) {
+            lookahead_sucess = false;
+            break;
+        }
+    }
+
+    lookahead_sucess = !(__any_sync(0xFFFFFFFF, !lookahead_sucess));
+    if (!lookahead_sucess) {
+        return 0;
+    }
 
     // initialize vertex order map
     for (int i = wd.num_mem[ld.wib_idx] + (ld.idx % WARP_SIZE); i < wd.tot_vert[ld.wib_idx]; i += WARP_SIZE) {
