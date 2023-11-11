@@ -9,6 +9,7 @@
 #include <sstream>
 #include <cmath>
 #include <time.h>
+#include <chrono>
 #include <sys/timeb.h>
 #include <cuda_runtime.h>
 #include <cuda.h>
@@ -25,7 +26,7 @@ using namespace std;
 
 // global memory size: 1.500.000.000 ints
 #define TASKS_SIZE 2000000
-#define EXPAND_THRESHOLD 5280
+#define EXPAND_THRESHOLD 352
 #define BUFFER_SIZE 100000000
 #define BUFFER_OFFSET_SIZE 1000000
 #define CLIQUES_SIZE 2000000
@@ -37,19 +38,19 @@ using namespace std;
 #define WCLIQUES_OFFSET_SIZE 500
 #define WTASKS_SIZE 50000
 #define WTASKS_OFFSET_SIZE 5000
-#define WVERTICES_SIZE 4000
-#define WADJACENCIES_SIZE 4000
+#define WVERTICES_SIZE 3200
+#define WADJACENCIES_SIZE 320
 
 // shared memory size: 12.300 ints
 #define VERTICES_SIZE 75
  
 // threads info
-#define BLOCK_SIZE 768
+#define BLOCK_SIZE 512
 #define NUM_OF_BLOCKS 22
 #define WARP_SIZE 32
 
 // run settings
-#define CPU_LEVELS_x2 10000
+#define CPU_LEVELS_x2 0
 
 // VERTEX DATA
 struct Vertex
@@ -238,8 +239,13 @@ struct GPU_Data
     Vertex* wtasks_vertices;
 
     Vertex* global_vertices;
-    int* adjacencies;
     int* vertex_order_map;
+    int* removed_candidates;
+    int* lane_removed_candidates;
+    int* remaining_candidates;
+    int* lane_remaining_candidates;
+    int* candidate_indegs;
+    int* lane_candidate_indegs;
 
     int* total_tasks;
 
@@ -295,6 +301,9 @@ struct Warp_Data
     int total_vertices[(BLOCK_SIZE / WARP_SIZE)];
 
     Vertex shared_vertices[VERTICES_SIZE * (BLOCK_SIZE / WARP_SIZE)];
+
+    int removed_count[(BLOCK_SIZE / WARP_SIZE)];
+    int remaining_count[(BLOCK_SIZE / WARP_SIZE)];
 
     int min_ext_deg[(BLOCK_SIZE / WARP_SIZE)];
     int lower_bound[(BLOCK_SIZE / WARP_SIZE)];
@@ -410,6 +419,8 @@ __device__ bool d_vert_isextendable(Vertex& vertex, int number_of_members, GPU_D
 __device__ bool d_vert_isextendable_LU(Vertex& vertex, GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
 __device__ int d_get_mindeg(int number_of_members, GPU_Data& dd);
 
+__device__ void d_print_vertices(Vertex* vertices, int size);
+
 
 
 // run on other data sets and compare with Quick, run on Cheaha, run larger data sets, see whether ratio is the same, whether results are correct
@@ -484,10 +495,7 @@ int main(int argc, char* argv[])
     }
 
     // TIME
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-    cudaEventRecord(start);
+    auto start = std::chrono::high_resolution_clock::now();
 
     // GRAPH / MINDEGS
     cout << ">:PRE-PROCESSING" << endl;
@@ -507,16 +515,10 @@ int main(int argc, char* argv[])
     // RM NON-MAX
     RemoveNonMax("temp.txt", argv[4]);
 
-    // Record the stop event
-    cudaEventRecord(stop);
-
     // TIME
-    cudaEventSynchronize(stop);
-    float milliseconds = 0;
-    cudaEventElapsedTime(&milliseconds, start, stop);
-    cout << ">:TIME: " << milliseconds << " ms" << endl;
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
+    auto stop = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
+    cout << ">:TIME: " << duration.count() << " ms" << endl;
 
     cout << ">:PROGRAM END" << endl;
     return 0;
@@ -623,7 +625,7 @@ void search(CPU_Graph& hg, ofstream& temp_results)
         //print_GPU_Data(dd);
         //print_GPU_Cliques(dd);
         print_Data_Sizes_Every(dd, 1);
-        //print_debug(dd);
+        print_debug(dd);
         //print_idebug(dd);
     }
 
@@ -724,10 +726,14 @@ void allocate_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc, CPU_Graph& hg)
     chkerr(cudaMemset(dd.wtasks_count, 0, sizeof(uint64_t) * number_of_warps));
 
     chkerr(cudaMalloc((void**)&dd.global_vertices, (sizeof(Vertex) * WVERTICES_SIZE) * number_of_warps));
-    chkerr(cudaMalloc((void**)&dd.adjacencies, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
     chkerr(cudaMalloc((void**)&dd.vertex_order_map, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
+    chkerr(cudaMalloc((void**)&dd.removed_candidates, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
+    chkerr(cudaMalloc((void**)&dd.lane_removed_candidates, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
+    chkerr(cudaMalloc((void**)&dd.remaining_candidates, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
+    chkerr(cudaMalloc((void**)&dd.lane_remaining_candidates, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
+    chkerr(cudaMalloc((void**)&dd.candidate_indegs, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
+    chkerr(cudaMalloc((void**)&dd.lane_candidate_indegs, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
 
-    chkerr(cudaMemset(dd.adjacencies, 0, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
     chkerr(cudaMemset(dd.vertex_order_map, -1, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
 
     chkerr(cudaMalloc((void**)&dd.maximal_expansion, sizeof(bool)));
@@ -801,7 +807,6 @@ void initialize_tasks(CPU_Graph& hg, CPU_Data& hd)
     int maximum_degree_index;
 
     // vertices information
-    int expansions;
     int total_vertices;
     int number_of_candidates;
     Vertex* vertices;
@@ -1243,7 +1248,6 @@ void free_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc)
     chkerr(cudaFree(dd.wtasks_vertices));
 
     chkerr(cudaFree(dd.global_vertices));
-    chkerr(cudaFree(dd.adjacencies));
 
     chkerr(cudaFree(dd.maximal_expansion));
     chkerr(cudaFree(dd.dumping_cliques));
@@ -1289,9 +1293,7 @@ int h_lookahead_pruning(CPU_Graph& hg, CPU_Cliques& hc, CPU_Data& hd, Vertex* re
     int pvertexid;
     uint64_t pneighbors_start;
     uint64_t pneighbors_end;
-    int pneighbors_count;
     int phelper1;
-    int phelper2;
 
 
     // check if members meet degree requirement, dont need to check 2hop adj as diameter pruning guarentees all members will be within 2hops of eveything
@@ -1350,9 +1352,7 @@ int h_remove_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* read_vertices, int&
     int pvertexid;
     uint64_t pneighbors_start;
     uint64_t pneighbors_end;
-    int pneighbors_count;
     int phelper1;
-    int phelper2;
 
     int mindeg;
 
@@ -1411,7 +1411,6 @@ int h_add_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_v
     uint64_t pneighbors_end;
     int pneighbors_count;
     int phelper1;
-    int phelper2;
 
 
 
@@ -1619,9 +1618,7 @@ void h_diameter_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int pvert
     // intersection
     uint64_t pneighbors_start;
     uint64_t pneighbors_end;
-    int pneighbors_count;
     int phelper1;
-    int phelper2;
 
     (*hd.remaining_count) = 0;
 
@@ -1648,14 +1645,10 @@ bool h_degree_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_
     int pvertexid;
     uint64_t pneighbors_start;
     uint64_t pneighbors_end;
-    int pneighbors_count;
     int phelper1;
-    int phelper2;
 
     // helper variables
     int num_val_cands;
-    bool invalid_bounds = false;
-    bool failed_found = false;
 
     qsort(hd.candidate_indegs, (*hd.remaining_count), sizeof(int), h_sort_degs);
 
@@ -3209,11 +3202,6 @@ __global__ void d_expand_level(GPU_Data dd)
             // ADD ONE VERTEX
             method_return = d_add_one_vertex(dd, wd, ld);
 
-            // too many vertices pruned continue, no need to check as not enough vertices
-            if (method_return == 1) {
-                continue;
-            }
-
 
 
             // HANDLE CLIQUES
@@ -3222,7 +3210,7 @@ __global__ void d_expand_level(GPU_Data dd)
             }
 
             // if vertex in x found as not extendable continue to next iteration
-            if (method_return == 2) {
+            if (method_return == 1) {
                 continue;
             }
 
@@ -3445,6 +3433,7 @@ __device__ int d_lookahead_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     int pvertexid;
     int phelper1;
 
+    lookahead_sucess = true;
     // check if members meet degree requirement, dont need to check 2hop adj as diameter pruning guarentees all members will be within 2hops of eveything
     for (int i = (ld.idx % WARP_SIZE); i < wd.num_mem[ld.wib_idx]; i += WARP_SIZE) {
         if (ld.read_vertices[wd.start[ld.wib_idx] + i].indeg + ld.read_vertices[wd.start[ld.wib_idx] + i].exdeg < dd.minimum_degrees[wd.tot_vert[ld.wib_idx]]) {
@@ -3457,23 +3446,18 @@ __device__ int d_lookahead_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     if (!lookahead_sucess) {
         return 0;
     }
-
+    
     // initialize vertex order map
     for (int i = wd.num_mem[ld.wib_idx] + (ld.idx % WARP_SIZE); i < wd.tot_vert[ld.wib_idx]; i += WARP_SIZE) {
         dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + ld.read_vertices[wd.start[ld.wib_idx] + i].vertexid] = i;
-    }
-
-    // reset lvl2adj
-    for (int i = wd.num_mem[ld.wib_idx] + (ld.idx % WARP_SIZE); i < wd.tot_vert[ld.wib_idx]; i += WARP_SIZE) {
-        ld.read_vertices[wd.start[ld.wib_idx] + i].lvl2adj = 0;
     }
     __syncwarp();
 
     // update lvl2adj to candidates for all vertices
     for (int i = wd.num_mem[ld.wib_idx]; i < wd.tot_vert[ld.wib_idx]; i++) {
         pvertexid = ld.read_vertices[wd.start[ld.wib_idx] + i].vertexid;
-        for (int j = dd.twohop_offsets[pvertexid] + (ld.idx % WARP_SIZE); i < dd.twohop_offsets[pvertexid + 1]; i += WARP_SIZE) {
-            phelper1 = dd.vertex_order_map[dd.twohop_neighbors[i]];
+        for (int j = dd.twohop_offsets[pvertexid] + (ld.idx % WARP_SIZE); j < dd.twohop_offsets[pvertexid + 1]; j += WARP_SIZE) {
+            phelper1 = dd.vertex_order_map[dd.twohop_neighbors[j]];
 
             if (phelper1 >= wd.num_mem[ld.wib_idx]) {
                 ld.read_vertices[wd.start[ld.wib_idx] + phelper1].lvl2adj++;
@@ -3486,11 +3470,9 @@ __device__ int d_lookahead_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
         dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + ld.read_vertices[wd.start[ld.wib_idx] + i].vertexid] = -1;
     }
 
-    lookahead_sucess = true;
-
     // compares all vertices to the lemmas from Quick
     for (int j = wd.num_mem[ld.wib_idx] + (ld.idx % WARP_SIZE); j < wd.tot_vert[ld.wib_idx]; j += WARP_SIZE) {
-        if (ld.read_vertices[wd.start[ld.wib_idx] + j].lvl2adj != wd.num_cand[ld.wib_idx] - 1 || ld.read_vertices[wd.start[ld.wib_idx] + j].indeg + ld.read_vertices[wd.start[ld.wib_idx] + j].exdeg < dd.minimum_degrees[wd.tot_vert[ld.wib_idx]]) {
+        if (ld.read_vertices[wd.start[ld.wib_idx] + j].lvl2adj < wd.num_cand[ld.wib_idx] - 1 || ld.read_vertices[wd.start[ld.wib_idx] + j].indeg + ld.read_vertices[wd.start[ld.wib_idx] + j].exdeg < dd.minimum_degrees[wd.tot_vert[ld.wib_idx]]) {
             lookahead_sucess = false;
             break;
         }
@@ -3509,6 +3491,7 @@ __device__ int d_lookahead_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
         }
         return 1;
     }
+
     return 0;
 }
 
@@ -3517,11 +3500,11 @@ __device__ int d_remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 {
     int pvertexid;
     int phelper1;
+
+    int mindeg;
     bool failed_found;
 
-    if (wd.tot_vert[ld.wib_idx] - 1 < (*dd.minimum_clique_size)) {
-        return 1;
-    }
+    mindeg = d_get_mindeg(wd.num_mem[ld.wib_idx], dd);
 
     // remove the last candidate in vertices
     if ((ld.idx % WARP_SIZE) == 0) {
@@ -3546,7 +3529,7 @@ __device__ int d_remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
         if (phelper1 > -1) {
             ld.read_vertices[wd.start[ld.wib_idx] + phelper1].exdeg--;
 
-            if (phelper1 < wd.num_mem[ld.wib_idx] && !d_vert_isextendable(ld.read_vertices[wd.start[ld.wib_idx] + phelper1], wd.num_mem[ld.wib_idx], dd)) {
+            if (phelper1 < wd.num_mem[ld.wib_idx] && ld.read_vertices[wd.start[ld.wib_idx] + phelper1].indeg + ld.read_vertices[wd.start[ld.wib_idx] + phelper1].exdeg < mindeg) {
                 failed_found = true;
                 break;
             }
@@ -3569,10 +3552,11 @@ __device__ int d_remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
 // when pruning each lane writes to its remaining or removed and increment count, then scan to get warp removed remaining write position then writes
 // when parallelizing parallelize inner loop to avoid race condition
-// returns 2, if too many vertices pruned to be considered, 1 if failed found or invalid bound, 0 otherwise
+// returns 1 if failed found or invalid bound, 0 otherwise
 __device__ int d_add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld) 
 {
     int pvertexid;
+    int phelper1;
     bool failed_found;
 
 
@@ -3585,13 +3569,19 @@ __device__ int d_add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
         wd.number_of_members[ld.wib_idx]++;
         wd.number_of_candidates[ld.wib_idx]--;
     }
+
+    // initialize vertex order map
+    for (int i = (ld.idx % WARP_SIZE); i < wd.total_vertices[ld.wib_idx]; i += WARP_SIZE) {
+        dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + ld.vertices[i].vertexid] = i;
+    }
     __syncwarp();
 
-    // update the exdeg and indeg of all vertices adj to the vertex just added to the vertex set
-    for (int k = (ld.idx % WARP_SIZE); k < wd.total_vertices[ld.wib_idx]; k += WARP_SIZE) {
-        if (d_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[ld.vertices[k].vertexid], dd.onehop_offsets[ld.vertices[k].vertexid + 1] - dd.onehop_offsets[ld.vertices[k].vertexid], pvertexid) != -1) {
-            ld.vertices[k].exdeg--;
-            ld.vertices[k].indeg++;
+    for (int i = dd.onehop_offsets[pvertexid] + (ld.idx % WARP_SIZE); i < dd.onehop_offsets[pvertexid + 1]; i += WARP_SIZE) {
+        phelper1 = dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + dd.onehop_neighbors[i]];
+
+        if (phelper1 > -1) {
+            ld.vertices[phelper1].indeg++;
+            ld.vertices[phelper1].exdeg--;
         }
     }
     __syncwarp();
@@ -3601,24 +3591,19 @@ __device__ int d_add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     // DIAMETER PRUNING
     d_diameter_pruning(dd, wd, ld, pvertexid);
 
-    // continue if not enough vertices after pruning
-    if (wd.total_vertices[ld.wib_idx] < (*(dd.minimum_clique_size))) {
-        return 1;
-    }
-
 
 
     // DEGREE BASED PRUNING
     failed_found = d_degree_pruning(dd, wd, ld);
 
-    // continue if not enough vertices after pruning
-    if (wd.total_vertices[ld.wib_idx] < (*(dd.minimum_clique_size))) {
-        return 1;
+    for (int i = (ld.idx % WARP_SIZE); i < WVERTICES_SIZE; i += WARP_SIZE) {
+        dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + i] = -1;
     }
+    __syncwarp();
 
     // if vertex in x found as not extendable continue to next iteration
     if (failed_found || wd.invalid_bounds[ld.wib_idx]) {
-        return 2;
+        return 1;
     }
    
     return 0;
@@ -3626,6 +3611,8 @@ __device__ int d_add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
 __device__ void d_diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, int pvertexid)
 {
+    // OLD
+
     int number_of_removed;
 
     number_of_removed = 0;
@@ -3648,6 +3635,39 @@ __device__ void d_diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, 
         wd.number_of_candidates[ld.wib_idx] -= number_of_removed;
     }
     __syncwarp();
+
+    // NEW
+
+    return;
+
+    // intersection
+    int phelper1;
+    int lane_remaining_count;
+
+    wd.remaining_count[ld.wib_idx] = 0;
+    lane_remaining_count = 0;
+
+    for (int i = wd.number_of_members[ld.wib_idx] + (ld.idx % WARP_SIZE); i < wd.total_vertices[ld.wib_idx]; i += WARP_SIZE) {
+        ld.vertices[i].label = -1;
+    }
+
+    for (int i = dd.twohop_offsets[pvertexid]; i < dd.twohop_offsets[pvertexid + 1]; i++) {
+        phelper1 = dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + dd.twohop_neighbors[i]];
+
+        //if (phelper1 >= number_of_members) {
+        //    vertices[phelper1].label = 0;
+        //    hd.candidate_indegs[(*hd.remaining_count)++] = vertices[phelper1].indeg;
+        //}
+    }
+
+    //for (int i = 0; i < (*hd.remaining_count); i++) {
+    //    vertices[number_of_members + i] = vertices[hd.remaining_candidates[i]];
+    //}
+
+    //total_vertices = total_vertices - number_of_candidates + (*hd.remaining_count);
+    //number_of_candidates = (*hd.remaining_count);
+
+    return;
 }
 
 __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
@@ -3935,7 +3955,7 @@ __device__ void d_write_to_tasks(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
         dd.wtasks_vertices[start_write + k].label = ld.vertices[k].label;
         dd.wtasks_vertices[start_write + k].indeg = ld.vertices[k].indeg;
         dd.wtasks_vertices[start_write + k].exdeg = ld.vertices[k].exdeg;
-        dd.wtasks_vertices[start_write + k].lvl2adj = ld.vertices[k].lvl2adj;
+        dd.wtasks_vertices[start_write + k].lvl2adj = 0;
     }
     if ((ld.idx % WARP_SIZE) == 0) {
         (dd.wtasks_count[(ld.idx / WARP_SIZE)])++;
@@ -4278,6 +4298,35 @@ __device__ bool d_vert_isextendable_LU(Vertex& vertex, GPU_Data& dd, Warp_Data& 
     else {
         return true;
     }
+}
+
+
+
+// --- DEBUG KERNELS ---
+
+__device__ void d_print_vertices(Vertex* vertices, int size)
+{
+    printf("\nOffsets:\n0 %i\nVertex:\n", size);
+    for (int i = 0; i < size; i++) {
+        printf("%i ", vertices[i].vertexid);
+    }
+    printf("\nLabel:\n");
+    for (int i = 0; i < size; i++) {
+        printf("%i ", vertices[i].label);
+    }
+    printf("\nIndeg:\n");
+    for (int i = 0; i < size; i++) {
+        printf("%i ", vertices[i].indeg);
+    }
+    printf("\nExdeg:\n");
+    for (int i = 0; i < size; i++) {
+        printf("%i ", vertices[i].exdeg);
+    }
+    printf("\nLvl2adj:\n");
+    for (int i = 0; i < size; i++) {
+        printf("%i ", vertices[i].lvl2adj);
+    }
+    printf("\n");
 }
 
 

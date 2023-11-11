@@ -21,6 +21,7 @@
     <Text Include="graph8.txt" />
     <Text Include="lastfm.txt" />
     <Text Include="amazon.txt" />
+    <Text Include="hyves.txt" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="DS_Diagram.jpg" />
