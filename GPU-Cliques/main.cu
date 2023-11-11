@@ -412,8 +412,13 @@ __device__ int d_get_mindeg(int number_of_members, GPU_Data& dd);
 
 
 
+// run on other data sets and compare with Quick, run on Cheaha, run larger data sets, see whether ratio is the same, whether results are correct
+// convert cpu version to gpu version
+// critical vertex pruning
+
+// when doing gpu add to remove or remain have each warp to their work on contingent vertices to ensure order stays the same after combining
+
 // refer to Quick
-// decreasung order
 // crit vert pruning
 // test speed and correctness
 
