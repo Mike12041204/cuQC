@@ -239,7 +239,6 @@ struct GPU_Data
     Vertex* wtasks_vertices;
 
     Vertex* global_vertices;
-    int* vertex_order_map;
     int* removed_candidates;
     int* lane_removed_candidates;
     int* remaining_candidates;
@@ -726,15 +725,12 @@ void allocate_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc, CPU_Graph& hg)
     chkerr(cudaMemset(dd.wtasks_count, 0, sizeof(uint64_t) * number_of_warps));
 
     chkerr(cudaMalloc((void**)&dd.global_vertices, (sizeof(Vertex) * WVERTICES_SIZE) * number_of_warps));
-    chkerr(cudaMalloc((void**)&dd.vertex_order_map, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
     chkerr(cudaMalloc((void**)&dd.removed_candidates, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
     chkerr(cudaMalloc((void**)&dd.lane_removed_candidates, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
     chkerr(cudaMalloc((void**)&dd.remaining_candidates, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
     chkerr(cudaMalloc((void**)&dd.lane_remaining_candidates, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
     chkerr(cudaMalloc((void**)&dd.candidate_indegs, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
     chkerr(cudaMalloc((void**)&dd.lane_candidate_indegs, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
-
-    chkerr(cudaMemset(dd.vertex_order_map, -1, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
 
     chkerr(cudaMalloc((void**)&dd.maximal_expansion, sizeof(bool)));
     chkerr(cudaMalloc((void**)&dd.dumping_cliques, sizeof(bool)));
@@ -1248,6 +1244,12 @@ void free_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc)
     chkerr(cudaFree(dd.wtasks_vertices));
 
     chkerr(cudaFree(dd.global_vertices));
+    chkerr(cudaFree(dd.remaining_candidates));
+    chkerr(cudaFree(dd.lane_remaining_candidates));
+    chkerr(cudaFree(dd.removed_candidates));
+    chkerr(cudaFree(dd.lane_removed_candidates));
+    chkerr(cudaFree(dd.candidate_indegs));
+    chkerr(cudaFree(dd.lane_candidate_indegs));
 
     chkerr(cudaFree(dd.maximal_expansion));
     chkerr(cudaFree(dd.dumping_cliques));
@@ -3446,12 +3448,6 @@ __device__ int d_lookahead_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     if (!lookahead_sucess) {
         return 0;
     }
-    
-    // initialize vertex order map
-    for (int i = wd.num_mem[ld.wib_idx] + (ld.idx % WARP_SIZE); i < wd.tot_vert[ld.wib_idx]; i += WARP_SIZE) {
-        dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + ld.read_vertices[wd.start[ld.wib_idx] + i].vertexid] = i;
-    }
-    __syncwarp();
 
     // update lvl2adj to candidates for all vertices
     for (int i = wd.num_mem[ld.wib_idx]; i < wd.tot_vert[ld.wib_idx]; i++) {
@@ -3463,11 +3459,6 @@ __device__ int d_lookahead_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
                 ld.read_vertices[wd.start[ld.wib_idx] + phelper1].lvl2adj++;
             }
         }
-    }
-
-    // reset vertex order map
-    for (int i = wd.num_mem[ld.wib_idx] + (ld.idx % WARP_SIZE); i < wd.tot_vert[ld.wib_idx]; i += WARP_SIZE) {
-        dd.vertex_order_map[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + ld.read_vertices[wd.start[ld.wib_idx] + i].vertexid] = -1;
     }
 
     // compares all vertices to the lemmas from Quick
