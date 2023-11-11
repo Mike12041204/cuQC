@@ -180,7 +180,7 @@ class CPU_Graph
     }
 };
 
-// CPU DATA
+// CPU DATAMO
 struct CPU_Data
 {
     uint64_t* tasks1_count;
@@ -436,14 +436,10 @@ __device__ int d_get_mindeg(int number_of_members, GPU_Data& dd);
 // - test program on larger graphs
 
 // TODO (HIGH PRIORITY)
-// - optimize code on CPU with improvements made on the GPU code
-// - optimize cpu sort_vertices method like gpu
 // - fill tasks kernel does not always need to launch can check outside of kernel to determine so
 // - critical vertex on gpu
 // - improve host critical vertex pruning like gpu version
 // - when working on larger data sets try removing return 2 from aov and see if it makes a difference
-// - update initialize tasks to make use of new strategies
-// - change write to tasks to set lvl2adj to 0
 
 // TODO (LOW PRIORITY)
 // - reevaluate and change where uint64_t's are used
@@ -557,7 +553,7 @@ void search(CPU_Graph& hg, ofstream& temp_results)
 
     // DEBUG
     h_print_Data_Sizes(hd, hc);
-    print_CPU_Data(hd);
+    //print_CPU_Data(hd);
 
     // CPU EXPANSION
     // cpu levels is multiplied by two to ensure that data ends up in tasks1, this allows us to always copy tasks1 without worry like before hybrid cpu approach
@@ -834,7 +830,7 @@ void initialize_tasks(CPU_Graph& hg, CPU_Data& hd)
         }
     }
 
-
+    
 
     // DEGREE-BASED PRUNING
     // update while half of vertices have been removed
@@ -876,8 +872,9 @@ void initialize_tasks(CPU_Graph& hg, CPU_Data& hd)
     number_of_candidates = (*hd.remaining_count);
 
     // update degrees based on last round of removed vertices
-    for (int i = 0; i < (*hd.removed_count); i++) {
-        pvertexid = hd.removed_candidates[i];
+    int removed_start = 0;
+    while((*hd.removed_count) > removed_start) {
+        pvertexid = hd.removed_candidates[removed_start];
         pneighbors_start = hg.onehop_offsets[pvertexid];
         pneighbors_end = hg.onehop_offsets[pvertexid + 1];
 
@@ -890,36 +887,36 @@ void initialize_tasks(CPU_Graph& hg, CPU_Data& hd)
                 if (vertices[phelper1].exdeg < minimum_degrees[minimum_clique_size]) {
                     vertices[phelper1].label = -1;
                     number_of_candidates--;
-                    hd.remaining_candidates[(*hd.removed_count)++] = phelper1;
+                    hd.removed_candidates[(*hd.removed_count)++] = phelper1;
                 }
+            }
+        }
+        removed_start++;
+    }
+
+
+    
+    // FIRST ROUND COVER PRUNING
+        // find cover vertex
+    maximum_degree = 0;
+    maximum_degree_index = 0;
+    for (int i = 0; i < total_vertices; i++) {
+        if (vertices[i].label == 0) {
+            if (vertices[i].exdeg > maximum_degree) {
+                maximum_degree = vertices[i].exdeg;
+                maximum_degree_index = i;
             }
         }
     }
+    vertices[maximum_degree_index].label = 3;
 
-    
-    if (false) {
-        // FIRST ROUND COVER PRUNING
-        // find cover vertex
-        maximum_degree = 0;
-        maximum_degree_index = 0;
-        for (int i = 0; i < total_vertices; i++) {
-            if (vertices[i].label == 0) {
-                if (vertices[i].exdeg > maximum_degree) {
-                    maximum_degree = vertices[i].exdeg;
-                    maximum_degree_index = i;
-                }
-            }
-        }
-        vertices[maximum_degree_index].label = 3;
-
-        // find all covered vertices
-        pneighbors_start = hg.onehop_offsets[maximum_degree_index];
-        pneighbors_end = hg.onehop_offsets[maximum_degree_index + 1];
-        for (int i = pneighbors_start; i < pneighbors_end; i++) {
-            pvertexid = hg.onehop_neighbors[i];
-            if (vertices[pvertexid].label == 0) {
-                vertices[pvertexid].label = 2;
-            }
+    // find all covered vertices
+    pneighbors_start = hg.onehop_offsets[maximum_degree_index];
+    pneighbors_end = hg.onehop_offsets[maximum_degree_index + 1];
+    for (int i = pneighbors_start; i < pneighbors_end; i++) {
+        pvertexid = hg.onehop_neighbors[i];
+        if (vertices[pvertexid].label == 0) {
+            vertices[pvertexid].label = 2;
         }
     }
 
@@ -937,7 +934,7 @@ void initialize_tasks(CPU_Graph& hg, CPU_Data& hd)
             hd.tasks1_vertices[j].label = vertices[j].label;
             hd.tasks1_vertices[j].indeg = vertices[j].indeg;
             hd.tasks1_vertices[j].exdeg = vertices[j].exdeg;
-            hd.tasks1_vertices[j].lvl2adj = vertices[j].lvl2adj;
+            hd.tasks1_vertices[j].lvl2adj = 0;
         }
         (*(hd.tasks1_count))++;
         hd.tasks1_offset[(*(hd.tasks1_count))] = total_vertices;
@@ -1307,11 +1304,6 @@ int h_lookahead_pruning(CPU_Graph& hg, CPU_Cliques& hc, CPU_Data& hd, Vertex* re
     // initialize vertex order map
     for (int i = num_mem; i < tot_vert; i++) {
         hd.vertex_order_map[read_vertices[start + i].vertexid] = i;
-    }
-
-    // reset lvl2adj
-    for (int i = num_mem; i < tot_vert; i++) {
-        read_vertices[start + i].lvl2adj = 0;
     }
 
     // update lvl2adj to candidates for all vertices
@@ -2071,7 +2063,7 @@ void h_write_to_tasks(CPU_Data& hd, Vertex* vertices, int total_vertices, Vertex
             write_vertices[start_write + k].label = vertices[k].label;
             write_vertices[start_write + k].indeg = vertices[k].indeg;
             write_vertices[start_write + k].exdeg = vertices[k].exdeg;
-            write_vertices[start_write + k].lvl2adj = vertices[k].lvl2adj;
+            write_vertices[start_write + k].lvl2adj = 0;
         }
         (*write_count)++;
         write_offsets[*write_count] = start_write + total_vertices;
@@ -2084,7 +2076,7 @@ void h_write_to_tasks(CPU_Data& hd, Vertex* vertices, int total_vertices, Vertex
             hd.buffer_vertices[start_write + k].label = vertices[k].label;
             hd.buffer_vertices[start_write + k].indeg = vertices[k].indeg;
             hd.buffer_vertices[start_write + k].exdeg = vertices[k].exdeg;
-            hd.buffer_vertices[start_write + k].lvl2adj = vertices[k].lvl2adj;
+            hd.buffer_vertices[start_write + k].lvl2adj = 0;
         }
         (*hd.buffer_count)++;
         hd.buffer_offset[(*hd.buffer_count)] = start_write + total_vertices;
