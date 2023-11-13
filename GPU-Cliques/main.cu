@@ -26,7 +26,7 @@ using namespace std;
 
 // global memory size: 1.500.000.000 ints
 #define TASKS_SIZE 2000000
-#define EXPAND_THRESHOLD 3520
+#define EXPAND_THRESHOLD 352
 #define BUFFER_SIZE 100000000
 #define BUFFER_OFFSET_SIZE 1000000
 #define CLIQUES_SIZE 2000000
@@ -50,7 +50,7 @@ using namespace std;
 #define WARP_SIZE 32
 
 // run settings
-#define CPU_LEVELS_x2 5
+#define CPU_LEVELS_x2 10
 
 // VERTEX DATA
 struct Vertex
@@ -3606,7 +3606,7 @@ __device__ void d_diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, 
         // DEBUG
         __syncwarp();
         if (ld.idx == 0) {
-            //d_print_vertices(ld.vertices, wd.total_vertices[ld.wib_idx]);
+            d_print_vertices(ld.vertices, wd.total_vertices[ld.wib_idx]);
         }
         __syncwarp();
 
@@ -3646,7 +3646,6 @@ __device__ void d_diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, 
         // DEBUG
         __syncwarp();
         if (ld.idx == 0) {
-            //printf("--2--");
             //d_print_vertices(ld.vertices, wd.total_vertices[ld.wib_idx]);
         }
         __syncwarp();
@@ -3694,6 +3693,14 @@ __device__ void d_diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, 
         }
         __syncwarp();
 
+        // DEBUG
+        // CURSOR - wrong values here
+        __syncwarp();
+        if (ld.idx == 0) {
+            //d_print_vertices(ld.vertices, wd.total_vertices[ld.wib_idx]);
+        }
+        __syncwarp();
+
         // scan to calculate write postion in warp arrays
         phelper2 = lane_remaining_count;
         for (int i = 1; i < WARP_SIZE; i *= 2) {
@@ -3701,6 +3708,7 @@ __device__ void d_diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, 
             if ((ld.idx % WARP_SIZE) >= i) {
                 lane_remaining_count += phelper1;
             }
+            __syncwarp();
         }
 
         // lane remaining count sum is scan for last lane and its value
@@ -3741,6 +3749,13 @@ __device__ void d_diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, 
         }
         __syncwarp();
 
+        // DEBUG
+        __syncwarp();
+        if (ld.idx == 0) {
+            //d_print_vertices(dd.remaining_candidates, wd.remaining_count[ld.wib_idx]);
+        }
+        __syncwarp();
+
         for (int i = (ld.idx % WARP_SIZE); i < wd.number_of_members[ld.wib_idx]; i += WARP_SIZE) {
             pvertexid = ld.vertices[i].vertexid;
 
@@ -3776,6 +3791,7 @@ __device__ void d_diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, 
             ld.vertices[wd.number_of_members[ld.wib_idx] + i] = dd.remaining_candidates[i];
         }
 
+        __syncwarp();
         if ((ld.idx % WARP_SIZE) == 0) {
             wd.total_vertices[ld.wib_idx] = wd.total_vertices[ld.wib_idx] - wd.number_of_candidates[ld.wib_idx] + wd.remaining_count[ld.wib_idx];
             wd.number_of_candidates[ld.wib_idx] = wd.remaining_count[ld.wib_idx];
@@ -3784,7 +3800,6 @@ __device__ void d_diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, 
         // DEBUG
         __syncwarp();
         if (ld.idx == 0) {
-            //printf("--1--");
             //d_print_vertices(ld.vertices, wd.total_vertices[ld.wib_idx]);
         }
         __syncwarp();
