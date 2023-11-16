@@ -26,7 +26,7 @@ using namespace std;
 
 // global memory size: 1.500.000.000 ints
 #define TASKS_SIZE 2000000
-#define EXPAND_THRESHOLD 352
+#define EXPAND_THRESHOLD 3520
 #define BUFFER_SIZE 100000000
 #define BUFFER_OFFSET_SIZE 1000000
 #define CLIQUES_SIZE 2000000
@@ -50,7 +50,7 @@ using namespace std;
 #define WARP_SIZE 32
 
 // run settings
-#define CPU_LEVELS_x2 10
+#define CPU_LEVELS_x2 0
 
 // VERTEX DATA
 struct Vertex
@@ -427,25 +427,6 @@ __device__ void d_print_vertices(Vertex* vertices, int size);
 // cpu crit
 // gpu crit
 
-// run on other data sets and compare with Quick, run on Cheaha, run larger data sets, see whether ratio is the same, whether results are correct
-// convert cpu version to gpu version
-// critical vertex pruning
-
-// when doing gpu add to remove or remain have each warp to their work on contingent vertices to ensure order stays the same after combining
-
-// refer to Quick
-// crit vert pruning
-// test speed and correctness
-
-// vertex order mp on the cpu
-// vertex order map on gpu
-// update cv pruning on the cpu
-// cv pruning on gpu
-
-// debug update degrees on cpu
-// implement fully on cpu
-// implment on gpu
-
 // TODO GENERALLY
 // - local memory usage is right around 100% cant enable exact LU pruning while being able to use all threads
 // - test program on larger graphs
@@ -458,10 +439,7 @@ __device__ void d_print_vertices(Vertex* vertices, int size);
 
 // TODO (LOW PRIORITY)
 // - reevaluate and change where uint64_t's are used
-// - optimize for loops to have simpler conditional and maybe no index if possible
-// - look at how Quick constructs graph and other things for optimization tricks
 // - label for vertices can be a byte rather than int
-// - optimize gpu sort methods
 // - cpu hybrid dfs-bfs expansion
 // - cover pruning on cpu
 
@@ -605,7 +583,7 @@ void search(CPU_Graph& hg, ofstream& temp_results)
         // DEBUG
         //print_WClique_Buffers(dd);
         //print_WTask_Buffers(dd);
-        if (print_Warp_Data_Sizes_Every(dd, 1)) {break;}
+        if (print_Warp_Data_Sizes_Every(dd, 1)) { break; }
         //print_All_Warp_Data_Sizes_Every(dd, 1);
 
         // consolidate all the warp tasks/cliques buffers into the next global tasks array, buffer, and cliques
@@ -628,8 +606,8 @@ void search(CPU_Graph& hg, ofstream& temp_results)
         // DEBUG
         //print_GPU_Data(dd);
         //print_GPU_Cliques(dd);
-        print_Data_Sizes_Every(dd, 1);
-        print_debug(dd);
+        print_Data_Sizes_Every(dd, 1); printf("\n");
+        //print_debug(dd);
         //print_idebug(dd);
         //break;
     }
@@ -3586,8 +3564,7 @@ __device__ int d_add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
 
     // DEGREE BASED PRUNING
-    //failed_found = d_degree_pruning(dd, wd, ld);
-    failed_found = false;
+    failed_found = d_degree_pruning(dd, wd, ld);
 
     // if vertex in x found as not extendable continue to next iteration
     if (failed_found || wd.invalid_bounds[ld.wib_idx]) {
@@ -3600,21 +3577,7 @@ __device__ int d_add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 // CURSOR - bug in this method, seems to cause wrong degrees (?), results differ every time indicating some sort of race condition
 __device__ void d_diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, int pvertexid)
 {
-    // DEBUG
-    __syncwarp();
-    if (ld.idx == 0) {
-        //d_print_vertices(ld.vertices, wd.total_vertices[ld.wib_idx]);
-    }
-    __syncwarp();
-
     if (false) {
-        // DEBUG
-        __syncwarp();
-        if (ld.idx == 0) {
-            d_print_vertices(ld.vertices, wd.total_vertices[ld.wib_idx]);
-        }
-        __syncwarp();
-
         // OLD
 
         int number_of_removed;
@@ -3639,22 +3602,14 @@ __device__ void d_diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, 
             wd.number_of_candidates[ld.wib_idx] -= number_of_removed;
         }
         __syncwarp();
-
-        // DEBUG
-        __syncwarp();
-        if (ld.idx == 0) {
-            d_print_vertices(ld.vertices, wd.total_vertices[ld.wib_idx]);
-        }
-        __syncwarp();
     }
     else {
-
-
-
         // DEBUG
+        int ptemp = pvertexid;
         __syncwarp();
-        if ((ld.idx / WARP_SIZE) == 166 && pvertexid == 49) {
-            printf("!!!%i!!!", pvertexid);
+        if ((ld.idx % WARP_SIZE) == 0 && (ld.idx / WARP_SIZE) == 166 && ptemp == 49) {
+            //printf("\nVertices:");
+            //d_print_vertices(ld.vertices, wd.total_vertices[ld.wib_idx]);
         }
         __syncwarp();
 
@@ -3764,9 +3719,19 @@ __device__ void d_diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, 
         }
         __syncwarp();
 
+        // DEBUG
+        __syncwarp();
+        if ((ld.idx % WARP_SIZE) == 0 && (ld.idx / WARP_SIZE) == 166 && ptemp == 49) {
+            //printf("\nRemaining:");
+            //d_print_vertices(dd.remaining_candidates + (WVERTICES_SIZE * (ld.idx / WARP_SIZE)), wd.remaining_count[ld.wib_idx]);
+            //printf("\nVertices:");
+            //d_print_vertices(ld.vertices, wd.total_vertices[ld.wib_idx]);
+        }
+        __syncwarp();
+
         // condense vertices so remaining are after members
         for (int i = (ld.idx % WARP_SIZE); i < wd.remaining_count[ld.wib_idx]; i += WARP_SIZE) {
-            ld.vertices[wd.number_of_members[ld.wib_idx] + i] = dd.remaining_candidates[i];
+            ld.vertices[wd.number_of_members[ld.wib_idx] + i] = dd.remaining_candidates[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + i];
         }
 
         if ((ld.idx % WARP_SIZE) == 0) {
@@ -3776,11 +3741,9 @@ __device__ void d_diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, 
 
         // DEBUG
         __syncwarp();
-        if ((ld.idx % WARP_SIZE) == 0 && (ld.idx / WARP_SIZE) == 166) {
-            if (ld.vertices[wd.total_vertices[ld.wib_idx] - 1].vertexid == 0 && ld.vertices[wd.total_vertices[ld.wib_idx] - 2].vertexid == 0) {
-                printf("!!!%i!!!", (ld.idx / WARP_SIZE));
-                d_print_vertices(ld.vertices, wd.total_vertices[ld.wib_idx]);
-            }
+        if ((ld.idx % WARP_SIZE) == 0 && (ld.idx / WARP_SIZE) == 166 && ptemp == 49) {
+            //printf("\nVertices:");
+            //d_print_vertices(ld.vertices, wd.total_vertices[ld.wib_idx]);
         }
         __syncwarp();
     }
