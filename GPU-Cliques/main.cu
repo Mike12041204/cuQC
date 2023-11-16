@@ -422,6 +422,11 @@ __device__ void d_print_vertices(Vertex* vertices, int size);
 
 
 
+// run tests on cheaha, use compute partition
+// gpu diam degree
+// cpu crit
+// gpu crit
+
 // run on other data sets and compare with Quick, run on Cheaha, run larger data sets, see whether ratio is the same, whether results are correct
 // convert cpu version to gpu version
 // critical vertex pruning
@@ -3643,10 +3648,13 @@ __device__ void d_diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, 
         __syncwarp();
     }
     else {
+
+
+
         // DEBUG
         __syncwarp();
-        if (ld.idx == 0) {
-            //d_print_vertices(ld.vertices, wd.total_vertices[ld.wib_idx]);
+        if ((ld.idx / WARP_SIZE) == 166 && pvertexid == 49) {
+            printf("!!!%i!!!", pvertexid);
         }
         __syncwarp();
 
@@ -3693,14 +3701,6 @@ __device__ void d_diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, 
         }
         __syncwarp();
 
-        // DEBUG
-        // CURSOR - wrong values here
-        __syncwarp();
-        if (ld.idx == 0) {
-            //d_print_vertices(ld.vertices, wd.total_vertices[ld.wib_idx]);
-        }
-        __syncwarp();
-
         // scan to calculate write postion in warp arrays
         phelper2 = lane_remaining_count;
         for (int i = 1; i < WARP_SIZE; i *= 2) {
@@ -3710,21 +3710,12 @@ __device__ void d_diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, 
             }
             __syncwarp();
         }
-
         // lane remaining count sum is scan for last lane and its value
         if ((ld.idx % WARP_SIZE) == WARP_SIZE - 1) {
             wd.remaining_count[ld.wib_idx] = lane_remaining_count;
         }
-
         // make scan exclusive
         lane_remaining_count -= phelper2;
-
-        // DEBUG
-        __syncwarp();
-        if (ld.idx == 0) {
-            //d_print_vertices(dd.remaining_candidates, wd.remaining_count[ld.wib_idx]);
-        }
-        __syncwarp();
 
         // parallel write lane arrays to warp array
         for (int i = 0; i < phelper2; i++) {
@@ -3733,14 +3724,7 @@ __device__ void d_diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, 
         }
         __syncwarp();
 
-        // DEBUG
-        __syncwarp();
-        if (ld.idx == 0) {
-            //d_print_vertices(dd.remaining_candidates, wd.remaining_count[ld.wib_idx]);
-        }
-        __syncwarp();
-
-        // update exdeg based on remaining candidates
+        // reset exdegs
         for (int i = (ld.idx % WARP_SIZE); i < wd.number_of_members[ld.wib_idx]; i += WARP_SIZE) {
             ld.vertices[i].exdeg = 0;
         }
@@ -3749,13 +3733,7 @@ __device__ void d_diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, 
         }
         __syncwarp();
 
-        // DEBUG
-        __syncwarp();
-        if (ld.idx == 0) {
-            //d_print_vertices(dd.remaining_candidates, wd.remaining_count[ld.wib_idx]);
-        }
-        __syncwarp();
-
+        // update exdeg based on remaining candidates
         for (int i = (ld.idx % WARP_SIZE); i < wd.number_of_members[ld.wib_idx]; i += WARP_SIZE) {
             pvertexid = ld.vertices[i].vertexid;
 
@@ -3791,7 +3769,6 @@ __device__ void d_diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, 
             ld.vertices[wd.number_of_members[ld.wib_idx] + i] = dd.remaining_candidates[i];
         }
 
-        __syncwarp();
         if ((ld.idx % WARP_SIZE) == 0) {
             wd.total_vertices[ld.wib_idx] = wd.total_vertices[ld.wib_idx] - wd.number_of_candidates[ld.wib_idx] + wd.remaining_count[ld.wib_idx];
             wd.number_of_candidates[ld.wib_idx] = wd.remaining_count[ld.wib_idx];
@@ -3799,8 +3776,11 @@ __device__ void d_diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, 
 
         // DEBUG
         __syncwarp();
-        if (ld.idx == 0) {
-            //d_print_vertices(ld.vertices, wd.total_vertices[ld.wib_idx]);
+        if ((ld.idx % WARP_SIZE) == 0 && (ld.idx / WARP_SIZE) == 166) {
+            if (ld.vertices[wd.total_vertices[ld.wib_idx] - 1].vertexid == 0 && ld.vertices[wd.total_vertices[ld.wib_idx] - 2].vertexid == 0) {
+                printf("!!!%i!!!", (ld.idx / WARP_SIZE));
+                d_print_vertices(ld.vertices, wd.total_vertices[ld.wib_idx]);
+            }
         }
         __syncwarp();
     }
