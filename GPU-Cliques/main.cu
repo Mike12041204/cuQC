@@ -50,7 +50,7 @@ using namespace std;
 #define WARP_SIZE 32
 
 // run settings
-#define CPU_LEVELS_x2 0
+#define CPU_LEVELS_x2 10
 
 // VERTEX DATA
 struct Vertex
@@ -407,7 +407,9 @@ __device__ void d_calculate_LU_bounds(GPU_Data& dd, Warp_Data& wd, Local_Data& l
 __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
 
 __device__ void d_sort(Vertex* target, int size, int lane_idx, int (*func)(Vertex&, Vertex&));
+__device__ void d_sort_i(int* target, int size, int lane_idx, int (*func)(int, int));
 __device__ int d_sort_vert_Q(Vertex& v1, Vertex& v2);
+__device__ int d_sort_degs(int n1, int n2);
 __device__ int d_sort_vert_cp(Vertex& vertex1, Vertex& vertex2);
 __device__ int d_sort_vert_cc(Vertex& vertex1, Vertex& vertex2);
 __device__ int d_sort_vert_lu(Vertex& vertex1, Vertex& vertex2);
@@ -3581,7 +3583,6 @@ __device__ int d_add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     return 0;
 }
 
-// CURSOR - bug in this method, seems to cause wrong degrees (?), results differ every time indicating some sort of race condition
 __device__ void d_diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, int pvertexid)
 {
     // vertices size * warp idx + (vertices size / warp size) * lane idx
@@ -3651,6 +3652,14 @@ __device__ void d_diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, 
     }
     __syncwarp();
 
+    // DEBUG
+    if (ld.idx == 0) {
+        for (int i = 0; i < wd.remaining_count[ld.wib_idx]; i++) {
+            printf("%i ", dd.candidate_indegs[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + i]);
+        }
+        printf("\n\n");
+    }
+
 
 
     // reset exdegs
@@ -3708,63 +3717,81 @@ __device__ void d_diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, 
 
 __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 {
-    bool failed_found;
-    int number_of_removed;
+    if (false) {
+        // OLD
+        bool failed_found;
+        int number_of_removed;
 
-    failed_found = false;
+        failed_found = false;
 
-    // sort cands in decreasing indeg order to prepare for calc LU
-    d_sort(ld.vertices, wd.total_vertices[ld.wib_idx], (ld.idx % WARP_SIZE), d_sort_vert_lu);
+        // sort cands in decreasing indeg order to prepare for calc LU
+        d_sort(ld.vertices, wd.total_vertices[ld.wib_idx], (ld.idx % WARP_SIZE), d_sort_vert_lu);
 
-    do
-    {
-        // calculate lower and upper bounds for vertices
-        d_calculate_LU_bounds(dd, wd, ld);
+        do
+        {
+            // calculate lower and upper bounds for vertices
+            d_calculate_LU_bounds(dd, wd, ld);
 
-        if (wd.invalid_bounds[ld.wib_idx]) {
-            break;
-        }
-
-        // check for failed vertices
-        for (int k = (ld.idx % WARP_SIZE); k < wd.number_of_members[ld.wib_idx]; k += WARP_SIZE) {
-            if (!d_vert_isextendable_LU(ld.vertices[k], dd, wd, ld)) {
-                failed_found = true;
+            if (wd.invalid_bounds[ld.wib_idx]) {
                 break;
             }
 
-        }
-        failed_found = __any_sync(0xFFFFFFFF, failed_found);
-        if (failed_found) {
-            break;
-        }
+            // check for failed vertices
+            for (int k = (ld.idx % WARP_SIZE); k < wd.number_of_members[ld.wib_idx]; k += WARP_SIZE) {
+                if (!d_vert_isextendable_LU(ld.vertices[k], dd, wd, ld)) {
+                    failed_found = true;
+                    break;
+                }
 
-        // remove cands that do not meet the deg requirement
-        number_of_removed = 0;
-        for (int k = wd.number_of_members[ld.wib_idx] + (ld.idx % WARP_SIZE); k < wd.total_vertices[ld.wib_idx]; k += WARP_SIZE) {
-            if (!d_cand_isvalid_LU(ld.vertices[k], dd, wd, ld)) {
-                ld.vertices[k].label = -1;
-                number_of_removed++;
             }
+            failed_found = __any_sync(0xFFFFFFFF, failed_found);
+            if (failed_found) {
+                break;
+            }
+
+            // remove cands that do not meet the deg requirement
+            number_of_removed = 0;
+            for (int k = wd.number_of_members[ld.wib_idx] + (ld.idx % WARP_SIZE); k < wd.total_vertices[ld.wib_idx]; k += WARP_SIZE) {
+                if (!d_cand_isvalid_LU(ld.vertices[k], dd, wd, ld)) {
+                    ld.vertices[k].label = -1;
+                    number_of_removed++;
+                }
+            }
+            for (int k = 1; k < 32; k *= 2) {
+                number_of_removed += __shfl_xor_sync(0xFFFFFFFF, number_of_removed, k);
+            }
+            d_sort(ld.vertices + wd.number_of_members[ld.wib_idx], wd.number_of_candidates[ld.wib_idx], (ld.idx % WARP_SIZE), d_sort_vert_cp);
+
+            // update exdeg of vertices connected to removed cands
+            d_update_degrees(dd, wd, ld, number_of_removed);
+
+            if ((ld.idx % WARP_SIZE) == 0) {
+                wd.total_vertices[ld.wib_idx] -= number_of_removed;
+                wd.number_of_candidates[ld.wib_idx] -= number_of_removed;
+            }
+            __syncwarp();
+        } while (number_of_removed > 0);
+
+        // return cands to expansion ordering
+        d_sort(ld.vertices + wd.number_of_members[ld.wib_idx], wd.number_of_candidates[ld.wib_idx], (ld.idx % WARP_SIZE), d_sort_vert_ex);
+
+        return failed_found;
+    }
+    else {
+        // NEW
+        int pvertexid;
+        int phelper1;
+
+        d_sort_i(dd.candidate_indegs + (WVERTICES_SIZE * (ld.idx / WARP_SIZE)), wd.remaining_count[ld.wib_idx], (ld.idx % WARP_SIZE), d_sort_degs);
+
+        // DEBUG
+        if (ld.idx == 0) {
+            for (int i = 0; i < wd.remaining_count[ld.wib_idx]; i++) {
+                printf("%i ", dd.candidate_indegs[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + i]);
+            }
+            printf("\n\n");
         }
-        for (int k = 1; k < 32; k *= 2) {
-            number_of_removed += __shfl_xor_sync(0xFFFFFFFF, number_of_removed, k);
-        }
-        d_sort(ld.vertices + wd.number_of_members[ld.wib_idx], wd.number_of_candidates[ld.wib_idx], (ld.idx % WARP_SIZE), d_sort_vert_cp);
-
-        // update exdeg of vertices connected to removed cands
-        d_update_degrees(dd, wd, ld, number_of_removed);
-
-        if ((ld.idx % WARP_SIZE) == 0) {
-            wd.total_vertices[ld.wib_idx] -= number_of_removed;
-            wd.number_of_candidates[ld.wib_idx] -= number_of_removed;
-        }
-        __syncwarp();
-    } while (number_of_removed > 0);
-
-    // return cands to expansion ordering
-    d_sort(ld.vertices + wd.number_of_members[ld.wib_idx], wd.number_of_candidates[ld.wib_idx], (ld.idx % WARP_SIZE), d_sort_vert_ex);
-
-    return failed_found;
+    }
 }
 
 __device__ void d_calculate_LU_bounds(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
@@ -4036,14 +4063,40 @@ __device__ void d_sort(Vertex* target, int size, int lane_idx, int (*func)(Verte
     // TYPE - PARALLEL
     // SPEED - O(n^2)
 
+    Vertex vertex1;
+    Vertex vertex2;
+
     for (int i = 0; i < size; i++) {
         for (int j = (i % 2) + (lane_idx * 2); j < size - 1; j += (WARP_SIZE * 2)) {
-            Vertex vertex1 = target[j];
-            Vertex vertex2 = target[j + 1];
+            vertex1 = target[j];
+            vertex2 = target[j + 1];
 
             if (func(vertex1, vertex2) == 1) {
-                target[j] = target[j + 1];
+                target[j] = vertex2;
                 target[j + 1] = vertex1;
+            }
+        }
+        __syncwarp();
+    }
+}
+
+__device__ void d_sort_i(int* target, int size, int lane_idx, int (*func)(int, int))
+{
+    // ALGO - ODD/EVEN
+    // TYPE - PARALLEL
+    // SPEED - O(n^2)
+
+    int num1;
+    int num2;
+
+    for (int i = 0; i < size; i++) {
+        for (int j = (i % 2) + (lane_idx * 2); j < size - 1; j += (WARP_SIZE * 2)) {
+            num1 = target[j];
+            num2 = target[j + 1];
+
+            if (func(num1, num2) == 1) {
+                target[j] = num2;
+                target[j + 1] = num1;
             }
         }
         __syncwarp();
@@ -4088,6 +4141,21 @@ __device__ int d_sort_vert_Q(Vertex& v1, Vertex& v2)
         return 1;
     else
         return 0;
+}
+
+__device__ int d_sort_degs(int n1, int n2)
+{
+    // descending order
+
+    if (n1 > n2) {
+        return -1;
+    }
+    else if (n1 < n2) {
+        return 1;
+    }
+    else {
+        return 0;
+    }
 }
 
 // sort vetices only considering in clique, candidates, and pruned vertices
