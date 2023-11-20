@@ -427,6 +427,11 @@ __device__ void d_print_vertices(Vertex* vertices, int size);
 
 
 
+//1. bus error debug; 
+// test code when working
+//2. analyze graph loading step why it is slow, 
+//3. implement the critcal pruning on GPU
+
 // TODO GENERALLY
 // - local memory usage is right around 100% cant enable exact LU pruning while being able to use all threads
 // - test program on larger graphs
@@ -4387,6 +4392,7 @@ __device__ int d_bsearch_array(int* search_array, int array_size, int search_num
     return -1;
 }
 
+// consider using merge
 __device__ void d_sort(Vertex* target, int size, int lane_idx, int (*func)(Vertex&, Vertex&))
 {
     // ALGO - ODD/EVEN
