@@ -33,6 +33,9 @@ using namespace std;
 #define CLIQUES_OFFSET_SIZE 20000
 #define CLIQUES_PERCENT 50
 
+// buffer size for lvl2adj
+#define LVL2ADJ_SIZE 100000000
+
 // per warp
 #define WCLIQUES_SIZE 5000
 #define WCLIQUES_OFFSET_SIZE 500
@@ -63,12 +66,14 @@ struct Vertex
 };
 
 // CPU GRAPH / CONSTRUCTOR
+int h_sort_asce(const void* a, const void* b);
 class CPU_Graph
 {
     public:
 
     int number_of_vertices;
     int number_of_edges;
+    uint64_t number_of_lvl2adj;
 
     // one dimentional arrays of 1hop and 2hop neighbors and the offsets for each vertex
     int* onehop_neighbors;
@@ -76,100 +81,113 @@ class CPU_Graph
     int* twohop_neighbors;
     uint64_t* twohop_offsets;
 
-    uint64_t number_of_onehop_neighbors;
-    uint64_t number_of_twohop_neighbors;
-
-    CPU_Graph(ifstream& graph_stream)
+    CPU_Graph(ifstream& graph_stream, int num_vert, int num_cand)
     {
-        // used to allocate memory for neighbor arrays
-        number_of_onehop_neighbors = 0;
-        number_of_twohop_neighbors = 0;
+        graph_stream.seekg(0, graph_stream.end);
+        string graph_text(graph_stream.tellg(), 0);
+        graph_stream.seekg(0);
+        graph_stream.read(const_cast<char*>(graph_text.data()), graph_text.size());
 
-        // vectors of sets of 1hop and 2hop neighbors
-        vector<set<int>> onehop_neighbors_vector;
-        vector<set<int>> twohop_neighbors_vector;
+        number_of_vertices = num_vert;
+        number_of_edges = num_cand;
 
-        // generate 1hop neighbors vector
-        string line;
-        string neighbor;
-        while (graph_stream.good()) {
-            getline(graph_stream, line);
-            if (line.length() != 0) {
-                stringstream neighbor_stream(line);
-                set<int> tempset;
-                while (!neighbor_stream.eof()) {
-                    getline(neighbor_stream, neighbor, ' ');
-                    int neighbor_id;
-                    try {
-                        neighbor_id = stoi(neighbor);
-                        tempset.insert(neighbor_id);
-                        number_of_onehop_neighbors++;
-                    }
-                    catch (const std::invalid_argument& e) {}
+        onehop_offsets = new uint64_t[number_of_vertices + 1];
+        onehop_neighbors = new int[number_of_edges * 2];
+        twohop_offsets = new uint64_t[number_of_vertices + 1];
+        twohop_neighbors = new int[LVL2ADJ_SIZE];
+
+        onehop_offsets[0] = 0;
+        twohop_offsets[0] = 0;
+        number_of_lvl2adj = 0;
+
+        bool* twohop_flag_DIA;
+        twohop_flag_DIA = new bool[number_of_vertices];
+        memset(twohop_flag_DIA, true, number_of_vertices * sizeof(bool));
+
+        // DEBUG
+        //cout << "|V| = " << number_of_vertices << " |E| = " << number_of_edges << " #bytes: " << text.size() << endl;
+
+        int vertex_count = 0;
+        int number_count = 0;
+        int current_number = 0;
+        bool empty = true;
+
+        // parse graph file assume adj are seperated by spaces ' ' and vertices are seperated by newlines "\r\n"
+        for (int i = 0; i < graph_text.size(); i++) {
+            char character = graph_text[i];
+
+            if (character == '\r') {
+                if (!empty) {
+                    onehop_neighbors[number_count++] = current_number;
                 }
-                onehop_neighbors_vector.push_back(tempset);
+                onehop_offsets[++vertex_count] = number_count;
+                current_number = 0;
+                i++;
+                empty = true;
+            }
+            else if (character == ' ') {
+                onehop_neighbors[number_count++] = current_number;
+                current_number = 0;
             }
             else {
-                set<int> tempset;
-                onehop_neighbors_vector.push_back(tempset);
+                current_number = current_number * 10 + (graph_text[i] - '0');
+                empty = false;
             }
         }
 
-        // set V and E
-        number_of_vertices = onehop_neighbors_vector.size();
-        number_of_edges = number_of_onehop_neighbors / 2;
+        // handle last element
+        if (!empty) {
+            onehop_neighbors[number_count++] = current_number;
+        }
+        onehop_offsets[++vertex_count] = number_count;
 
-        // generate 2hop neighbors vector
-        int current_vertex = 0;
-        for (set<int> vertex_neighbors : onehop_neighbors_vector) {
-            set<int> tempset(vertex_neighbors);
-            for (int neighbor : vertex_neighbors) {
-                for (int twohop_neighbor : onehop_neighbors_vector.at(neighbor)) {
-                    if (twohop_neighbor != current_vertex) {
-                        tempset.insert(twohop_neighbor);
+        // handle lvl2 adj
+        for (int i = 0; i < vertex_count; i++) {
+            for (int j = onehop_offsets[i]; j < onehop_offsets[i + 1]; j++) {
+                int lvl1adj = onehop_neighbors[j];
+                if (twohop_flag_DIA[lvl1adj]) {
+                    twohop_neighbors[number_of_lvl2adj++] = lvl1adj;
+                    twohop_flag_DIA[lvl1adj] = false;
+                }
+
+                for (int k = onehop_offsets[lvl1adj]; k < onehop_offsets[lvl1adj + 1]; k++) {
+                    int lvl2adj = onehop_neighbors[k];
+                    if (twohop_flag_DIA[lvl2adj] && lvl2adj != i) {
+                        twohop_neighbors[number_of_lvl2adj++] = lvl2adj;
+                        twohop_flag_DIA[lvl2adj] = false;
                     }
                 }
             }
-            twohop_neighbors_vector.push_back(tempset);
-            number_of_twohop_neighbors += tempset.size();
-            current_vertex++;
+
+            twohop_offsets[i + 1] = number_of_lvl2adj;
+            memset(twohop_flag_DIA, true, number_of_vertices * sizeof(bool));
         }
 
-        // convert onehop vector to arrays
-        onehop_neighbors = new int[number_of_onehop_neighbors];
-        onehop_offsets = new uint64_t[number_of_vertices + 1];
-        if (onehop_neighbors == nullptr || onehop_offsets == nullptr) {
-            cout << "ERROR: bad malloc" << endl;
-        }
-        onehop_offsets[0] = 0;
-        int offset = 0;
-        for (int i = 0; i < onehop_neighbors_vector.size(); i++) {
-            offset += onehop_neighbors_vector.at(i).size();
-            onehop_offsets[i + 1] = offset;
-            int j = 0;
-            for (int neighbor : onehop_neighbors_vector.at(i)) {
-                onehop_neighbors[onehop_offsets[i] + j] = neighbor;
-                j++;
-            }
+        // sort adjacencies
+        for (int i = 0; i < vertex_count; i++) {
+            qsort(onehop_neighbors + onehop_offsets[i], onehop_offsets[i + 1] - onehop_offsets[i], sizeof(int), h_sort_asce);
+            qsort(twohop_neighbors + twohop_offsets[i], twohop_offsets[i + 1] - twohop_offsets[i], sizeof(int), h_sort_asce);
         }
 
-        //convert twohop vector to arrays
-        twohop_neighbors = new int[number_of_twohop_neighbors];
-        twohop_offsets = new uint64_t[number_of_vertices + 1];
-        if (twohop_neighbors == nullptr || twohop_offsets == nullptr) {
-            cout << "ERROR: bad malloc" << endl;
-        }
-        twohop_offsets[0] = 0;
-        offset = 0;
-        for (int i = 0; i < twohop_neighbors_vector.size(); i++) {
-            offset += twohop_neighbors_vector.at(i).size();
-            twohop_offsets[i + 1] = offset;
-            int j = 0;
-            for (int neighbor : twohop_neighbors_vector.at(i)) {
-                twohop_neighbors[twohop_offsets[i] + j] = neighbor;
-                j++;
-            }
-        }
+        // DEBUG
+        //cout << "|V| = " << vertex_count << " |E| = " << number_count / 2 << " adj: " << number_count << " lvl2adj: " << number_of_lvl2adj << endl;
+        //for (int i = 0; i < vertex_count; i++) {
+        //    cout << i << ": " << flush;
+        //    for (int j = onehop_offsets[i]; j < onehop_offsets[i + 1]; j++) {
+        //        cout << onehop_neighbors[j] << " " << flush;
+        //    }
+        //    cout << endl;
+        //}
+        //cout << "!!!" << endl;
+        //for (int i = 0; i < vertex_count; i++) {
+        //    cout << i << ": " << flush;
+        //    for (int j = twohop_offsets[i]; j < twohop_offsets[i + 1]; j++) {
+        //        cout << twohop_neighbors[j] << " " << flush;
+        //    }
+        //    cout << endl;
+        //}
+
+        delete twohop_flag_DIA;
     }
 
     ~CPU_Graph() 
@@ -376,8 +394,8 @@ inline void chkerr(cudaError_t code);
 // DEBUG
 void print_CPU_Data(CPU_Data& hd);
 void print_GPU_Data(GPU_Data& dd);
-void print_CPU_Graph(CPU_Graph& host_hg);
-void print_GPU_Graph(GPU_Data& dd, CPU_Graph& host_hg);
+void print_CPU_Graph(CPU_Graph& hg);
+void print_GPU_Graph(GPU_Data& dd, CPU_Graph& hg);
 void print_WTask_Buffers(GPU_Data& dd);
 void print_WClique_Buffers(GPU_Data& dd);
 void print_GPU_Cliques(GPU_Data& dd);
@@ -465,8 +483,8 @@ int* minimum_degrees;
 int main(int argc, char* argv[])
 {
     // ENSURE PROPER USAGE
-    if (argc != 5) {
-        printf("Usage: ./main <graph_file> <gamma> <min_size> <output_file.txt>\n");
+    if (argc != 7) {
+        printf("Usage: ./main <graph_file> <gamma> <min_size> <output_file.txt> <number of vertices> <number of edges>\n");
         return 1;
     }
     ifstream graph_stream(argv[1], ios::in);
@@ -484,13 +502,19 @@ int main(int argc, char* argv[])
         printf("minimum size must be greater than 1\n");
         return 1;
     }
+    int num_vert = atoi(argv[4]);
+    int num_cand = atoi(argv[5]);
+    if (num_vert < 0 || num_vert > 100000000 || num_cand < 0 || num_cand > 100000000) {
+        printf("vertices and edges must be greater than 0 and less than 100.000.000\n");
+        return 1;
+    }
 
     // TIME
     auto start = std::chrono::high_resolution_clock::now();
 
     // GRAPH / MINDEGS
     cout << ">:PRE-PROCESSING" << endl;
-    CPU_Graph hg(graph_stream);
+    CPU_Graph hg(graph_stream, num_vert, num_cand);
     graph_stream.close();
     calculate_minimum_degrees(hg);
     ofstream temp_results("temp.txt");
@@ -504,7 +528,7 @@ int main(int argc, char* argv[])
     temp_results.close();
 
     // RM NON-MAX
-    RemoveNonMax("temp.txt", argv[4]);
+    RemoveNonMax("temp.txt", argv[6]);
 
     // TIME
     auto stop = std::chrono::high_resolution_clock::now();
@@ -635,16 +659,16 @@ void allocate_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc, CPU_Graph& hg)
     // GPU GRAPH
     chkerr(cudaMalloc((void**)&dd.number_of_vertices, sizeof(int)));
     chkerr(cudaMalloc((void**)&dd.number_of_edges, sizeof(int)));
-    chkerr(cudaMalloc((void**)&dd.onehop_neighbors, sizeof(int) * hg.number_of_onehop_neighbors));
+    chkerr(cudaMalloc((void**)&dd.onehop_neighbors, sizeof(int) * hg.number_of_edges * 2));
     chkerr(cudaMalloc((void**)&dd.onehop_offsets, sizeof(uint64_t) * (hg.number_of_vertices + 1)));
-    chkerr(cudaMalloc((void**)&dd.twohop_neighbors, sizeof(int) * hg.number_of_twohop_neighbors));
+    chkerr(cudaMalloc((void**)&dd.twohop_neighbors, sizeof(int) * hg.number_of_lvl2adj));
     chkerr(cudaMalloc((void**)&dd.twohop_offsets, sizeof(uint64_t) * (hg.number_of_vertices + 1)));
 
     chkerr(cudaMemcpy(dd.number_of_vertices, &(hg.number_of_vertices), sizeof(int), cudaMemcpyHostToDevice));
     chkerr(cudaMemcpy(dd.number_of_edges, &(hg.number_of_edges), sizeof(int), cudaMemcpyHostToDevice));
-    chkerr(cudaMemcpy(dd.onehop_neighbors, hg.onehop_neighbors, sizeof(int) * hg.number_of_onehop_neighbors, cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(dd.onehop_neighbors, hg.onehop_neighbors, sizeof(int) * hg.number_of_edges * 2, cudaMemcpyHostToDevice));
     chkerr(cudaMemcpy(dd.onehop_offsets, hg.onehop_offsets, sizeof(uint64_t) * (hg.number_of_vertices + 1), cudaMemcpyHostToDevice));
-    chkerr(cudaMemcpy(dd.twohop_neighbors, hg.twohop_neighbors, sizeof(int) * hg.number_of_twohop_neighbors, cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(dd.twohop_neighbors, hg.twohop_neighbors, sizeof(int) * hg.number_of_lvl2adj, cudaMemcpyHostToDevice));
     chkerr(cudaMemcpy(dd.twohop_offsets, hg.twohop_offsets, sizeof(uint64_t) * (hg.number_of_vertices + 1), cudaMemcpyHostToDevice));
 
     // CPU DATA
@@ -2361,6 +2385,26 @@ int h_sort_desc(const void* a, const void* b)
     }
 }
 
+// sorts degrees in ascending order
+int h_sort_asce(const void* a, const void* b)
+{
+    int n1;
+    int n2;
+
+    n1 = *(int*)a;
+    n2 = *(int*)b;
+
+    if (n1 < n2) {
+        return -1;
+    }
+    else if (n1 > n2) {
+        return 1;
+    }
+    else {
+        return 0;
+    }
+}
+
 inline int h_get_mindeg(int clique_size) {
     if (clique_size < minimum_clique_size) {
         return minimum_degrees[minimum_clique_size];
@@ -2455,44 +2499,44 @@ inline void chkerr(cudaError_t code)
 
 // --- DEBUG METHODS ---
 
-void print_CPU_Graph(CPU_Graph& host_hg) {
+void print_CPU_Graph(CPU_Graph& hg) {
     cout << endl << " --- (CPU_Graph)host_graph details --- " << endl;
-    cout << endl << "|V|: " << host_hg.number_of_vertices << " |E|: " << host_hg.number_of_edges << endl;
+    cout << endl << "|V|: " << hg.number_of_vertices << " |E|: " << hg.number_of_edges << endl;
     cout << endl << "Onehop Offsets:" << endl;
-    for (uint64_t i = 0; i <= host_hg.number_of_vertices; i++) {
-        cout << host_hg.onehop_offsets[i] << " ";
+    for (uint64_t i = 0; i <= hg.number_of_vertices; i++) {
+        cout << hg.onehop_offsets[i] << " ";
     }
     cout << endl << "Onehop Neighbors:" << endl;
-    for (uint64_t i = 0; i < host_hg.number_of_onehop_neighbors; i++) {
-        cout << host_hg.onehop_neighbors[i] << " ";
+    for (uint64_t i = 0; i < hg.number_of_edges * 2; i++) {
+        cout << hg.onehop_neighbors[i] << " ";
     }
     cout << endl << "Twohop Offsets:" << endl;
-    for (uint64_t i = 0; i <= host_hg.number_of_vertices; i++) {
-        cout << host_hg.twohop_offsets[i] << " ";
+    for (uint64_t i = 0; i <= hg.number_of_vertices; i++) {
+        cout << hg.twohop_offsets[i] << " ";
     }
     cout << endl << "Twohop Neighbors:" << endl;
-    for (uint64_t i = 0; i < host_hg.number_of_twohop_neighbors; i++) {
-        cout << host_hg.twohop_neighbors[i] << " ";
+    for (uint64_t i = 0; i < hg.number_of_lvl2adj; i++) {
+        cout << hg.twohop_neighbors[i] << " ";
     }
     cout << endl << endl;
 }
 
-void print_GPU_Graph(GPU_Data& dd, CPU_Graph& host_hg)
+void print_GPU_Graph(GPU_Data& dd, CPU_Graph& hg)
 {
     int* number_of_vertices = new int;
     int* number_of_edges = new int;
 
-    int* onehop_neighbors = new int[host_hg.number_of_onehop_neighbors];
-    uint64_t * onehop_offsets = new uint64_t[(host_hg.number_of_vertices)+1];
-    int* twohop_neighbors = new int[host_hg.number_of_twohop_neighbors];
-    uint64_t * twohop_offsets = new uint64_t[(host_hg.number_of_vertices)+1];
+    int* onehop_neighbors = new int[hg.number_of_edges * 2];
+    uint64_t * onehop_offsets = new uint64_t[(hg.number_of_vertices)+1];
+    int* twohop_neighbors = new int[hg.number_of_lvl2adj];
+    uint64_t * twohop_offsets = new uint64_t[(hg.number_of_vertices)+1];
 
     chkerr(cudaMemcpy(number_of_vertices, dd.number_of_vertices, sizeof(int), cudaMemcpyDeviceToHost));
     chkerr(cudaMemcpy(number_of_edges, dd.number_of_edges, sizeof(int), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(onehop_neighbors, dd.onehop_neighbors, sizeof(int)*host_hg.number_of_onehop_neighbors, cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(onehop_offsets, dd.onehop_offsets, sizeof(uint64_t)*(host_hg.number_of_vertices+1), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(twohop_neighbors, dd.twohop_neighbors, sizeof(int)*host_hg.number_of_twohop_neighbors, cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(twohop_offsets, dd.twohop_offsets, sizeof(uint64_t)*(host_hg.number_of_vertices+1), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(onehop_neighbors, dd.onehop_neighbors, sizeof(int)*hg.number_of_edges * 2, cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(onehop_offsets, dd.onehop_offsets, sizeof(uint64_t)*(hg.number_of_vertices+1), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(twohop_neighbors, dd.twohop_neighbors, sizeof(int)*hg.number_of_lvl2adj, cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(twohop_offsets, dd.twohop_offsets, sizeof(uint64_t)*(hg.number_of_vertices+1), cudaMemcpyDeviceToHost));
 
     cout << endl << " --- (GPU_Graph)device_graph details --- " << endl;
     cout << endl << "|V|: " << (*number_of_vertices) << " |E|: " << (*number_of_edges) << endl;
@@ -2501,7 +2545,7 @@ void print_GPU_Graph(GPU_Data& dd, CPU_Graph& host_hg)
         cout << onehop_offsets[i] << " ";
     }
     cout << endl << "Onehop Neighbors:" << endl;
-    for (uint64_t i = 0; i < host_hg.number_of_onehop_neighbors; i++) {
+    for (uint64_t i = 0; i < hg.number_of_edges * 2; i++) {
         cout << onehop_neighbors[i] << " ";
     }
     cout << endl << "Twohop Offsets:" << endl;
@@ -2509,7 +2553,7 @@ void print_GPU_Graph(GPU_Data& dd, CPU_Graph& host_hg)
         cout << twohop_offsets[i] << " ";
     }
     cout << endl << "Twohop Neighbors:" << endl;
-    for (uint64_t i = 0; i < host_hg.number_of_twohop_neighbors; i++) {
+    for (uint64_t i = 0; i < hg.number_of_lvl2adj; i++) {
         cout << twohop_neighbors[i] << " ";
     }
     cout << endl << endl;
@@ -3641,7 +3685,6 @@ __device__ void d_diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, 
     __syncwarp();
 }
 
-// TODO - see if variables can be removed
 // TODO - check for extra syncs
 // returns true if invalid bounds or failed found
 __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
