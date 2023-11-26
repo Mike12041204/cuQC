@@ -365,7 +365,7 @@ int h_lsearch_vert(Vertex* search_array, int array_size, int search_vertexid);
 int h_sort_vert(const void* a, const void* b);
 int h_sort_vert_Q(const void* a, const void* b);
 int h_sort_vert_LU(const void* a, const void* b);
-int h_sort_degs(const void* a, const void* b);
+int h_sort_desc(const void* a, const void* b);
 inline int h_get_mindeg(int clique_size);
 inline bool h_cand_isvalid(Vertex vertex, int clique_size);
 inline bool h_cand_isvalid_LU(Vertex vertex, int clique_size, int upper_bound, int lower_bound, int min_ext_deg);
@@ -427,10 +427,11 @@ __device__ void d_print_vertices(Vertex* vertices, int size);
 
 
 
-//1. bus error debug; 
-// test code when working
-//2. analyze graph loading step why it is slow, 
-//3. implement the critcal pruning on GPU
+// - bus error debug; 
+// - test code when working
+// - analyze graph loading step why it is slow, 
+// - implement the critcal pruning on CPU and GPU
+// - improve GPU sorting algorithm
 
 // TODO GENERALLY
 // - local memory usage is right around 100% cant enable exact LU pruning while being able to use all threads
@@ -1645,7 +1646,7 @@ bool h_degree_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_
     // helper variables
     int num_val_cands;
 
-    qsort(hd.candidate_indegs, (*hd.remaining_count), sizeof(int), h_sort_degs);
+    qsort(hd.candidate_indegs, (*hd.remaining_count), sizeof(int), h_sort_desc);
 
     // if invalid bounds found while calculating lower and upper bounds
     if (h_calculate_LU_bounds(hd, upper_bound, lower_bound, min_ext_deg, vertices, number_of_members, (*hd.remaining_count))) {
@@ -1716,7 +1717,7 @@ bool h_degree_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_
             }
         }
 
-        qsort(hd.candidate_indegs, num_val_cands, sizeof(int), h_sort_degs);
+        qsort(hd.candidate_indegs, num_val_cands, sizeof(int), h_sort_desc);
 
         // if invalid bounds found while calculating lower and upper bounds
         if (h_calculate_LU_bounds(hd, upper_bound, lower_bound, min_ext_deg, vertices, number_of_members, num_val_cands)) {
@@ -2210,6 +2211,7 @@ int h_sort_vert(const void* a, const void* b)
     return 0;
 }
 
+// update how this method looks
 int h_sort_vert_Q(const void* a, const void* b)
 {
     // order is: covered -> cands -> cover
@@ -2340,7 +2342,7 @@ int h_sort_vert_LU(const void* a, const void* b)
 }
 
 // sorts degrees in descending order
-int h_sort_degs(const void* a, const void* b) 
+int h_sort_desc(const void* a, const void* b) 
 {
     int n1;
     int n2;

@@ -23,6 +23,9 @@
     <Text Include="amazon.txt">
       <Filter>graph_files</Filter>
     </Text>
+    <Text Include="hyves.txt">
+      <Filter>graph_files</Filter>
+    </Text>
   </ItemGroup>
   <ItemGroup>
     <Image Include="DS_Diagram.jpg" />
