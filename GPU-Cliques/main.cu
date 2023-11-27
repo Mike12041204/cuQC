@@ -470,30 +470,24 @@ __device__ void d_print_vertices(Vertex* vertices, int size);
 
 
 
-// - bus error debug; 
-// - test code when working
-// - analyze graph loading step why it is slow, 
-// - implement the critcal pruning on CPU and GPU
-// - improve GPU sorting algorithm
-
 // TODO GENERALLY
-// - local memory usage is right around 100% cant enable exact LU pruning while being able to use all threads
 // - test program on larger graphs
+// - try different datasets besides hyves
 
 // TODO (HIGH PRIORITY)
-// - fill tasks kernel does not always need to launch can check outside of kernel to determine so
+// - debug errors when running on larger graphs
 // - critical vertex on cpu and gpu
-// - decrease variables on gpu
-// - ensure no unecessary syncs on the gpu
 
 // TODO (LOW PRIORITY)
+// - fill tasks kernel does not always need to launch can check outside of kernel to determine so
+// - ensure no unecessary syncs on the gpu
 // - reevaluate and change where uint64_t's are used
 // - label for vertices can be a byte rather than int
 // - cpu hybrid dfs-bfs expansion
 // - cover pruning on cpu
 // - dont need lvl2adj in all places anymore
-// - optimize generating graph, see what Quick does
 // - way to skip early levels for smaller graphs to decrease CPU time
+// - improve sorting algorithm
 
 
 
