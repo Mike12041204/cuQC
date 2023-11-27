@@ -33,7 +33,9 @@ using namespace std;
 #define CLIQUES_OFFSET_SIZE 20000
 #define CLIQUES_PERCENT 50
 
-// buffer size for lvl2adj
+// buffer size for CPU onehop and twohop adjacency array and offsets, ensure these are large enough
+#define OFFSETS_SIZE 1000000
+#define LVL1ADJ_SIZE 10000000
 #define LVL2ADJ_SIZE 100000000
 
 // per warp
@@ -54,6 +56,9 @@ using namespace std;
 
 // run settings
 #define CPU_LEVELS_x2 0
+
+// debug toggle
+#define DEBUG_TOGGLE 0
 
 // VERTEX DATA
 struct Vertex
@@ -81,28 +86,19 @@ class CPU_Graph
     int* twohop_neighbors;
     uint64_t* twohop_offsets;
 
-    CPU_Graph(ifstream& graph_stream, int num_vert, int num_cand)
+    CPU_Graph(ifstream& graph_stream)
     {
         graph_stream.seekg(0, graph_stream.end);
         string graph_text(graph_stream.tellg(), 0);
         graph_stream.seekg(0);
         graph_stream.read(const_cast<char*>(graph_text.data()), graph_text.size());
 
-        number_of_vertices = num_vert;
-        number_of_edges = num_cand;
-
-        onehop_offsets = new uint64_t[number_of_vertices + 1];
-        onehop_neighbors = new int[number_of_edges * 2];
-        twohop_offsets = new uint64_t[number_of_vertices + 1];
+        onehop_offsets = new uint64_t[OFFSETS_SIZE];
+        onehop_neighbors = new int[LVL1ADJ_SIZE];
         twohop_neighbors = new int[LVL2ADJ_SIZE];
 
         onehop_offsets[0] = 0;
-        twohop_offsets[0] = 0;
         number_of_lvl2adj = 0;
-
-        bool* twohop_flag_DIA;
-        twohop_flag_DIA = new bool[number_of_vertices];
-        memset(twohop_flag_DIA, true, number_of_vertices * sizeof(bool));
 
         // DEBUG
         //cout << "|V| = " << number_of_vertices << " |E| = " << number_of_edges << " #bytes: " << text.size() << endl;
@@ -112,22 +108,33 @@ class CPU_Graph
         int current_number = 0;
         bool empty = true;
 
+        // TODO - way to detect and handle these cases without changing code?
+        // TWO FORMATS SO FAR
+        // 1 -  VSCode \r\n between lines, no ending character
+        // 2 - Visual Studio \n between lines, numerous \0 ending characters
+        
         // parse graph file assume adj are seperated by spaces ' ' and vertices are seperated by newlines "\r\n"
         for (int i = 0; i < graph_text.size(); i++) {
             char character = graph_text[i];
 
-            if (character == '\r') {
+            // line depends on whether newline is "\r\n" or '\n'
+            if (character == '\n') {
                 if (!empty) {
                     onehop_neighbors[number_count++] = current_number;
                 }
                 onehop_offsets[++vertex_count] = number_count;
                 current_number = 0;
-                i++;
+                // line depends on whether newline is "\r\n" or '\n'
+                //i++;
                 empty = true;
             }
             else if (character == ' ') {
                 onehop_neighbors[number_count++] = current_number;
                 current_number = 0;
+            }
+            else if (character == '\0') {
+                // line depends on whether newline is "\r\n" or '\n'
+                break;
             }
             else {
                 current_number = current_number * 10 + (graph_text[i] - '0');
@@ -135,11 +142,24 @@ class CPU_Graph
             }
         }
 
+        // line depends on whether newline is "\r\n" or '\n'
         // handle last element
         if (!empty) {
             onehop_neighbors[number_count++] = current_number;
         }
         onehop_offsets[++vertex_count] = number_count;
+
+        // set variables an initialize twohop arrays
+        number_of_vertices = vertex_count;
+        number_of_edges = number_count / 2;
+
+        twohop_offsets = new uint64_t[number_of_vertices + 1];
+
+        twohop_offsets[0] = 0;
+
+        bool* twohop_flag_DIA;
+        twohop_flag_DIA = new bool[number_of_vertices];
+        memset(twohop_flag_DIA, true, number_of_vertices * sizeof(bool));
 
         // handle lvl2 adj
         for (int i = 0; i < vertex_count; i++) {
@@ -170,22 +190,27 @@ class CPU_Graph
         }
 
         // DEBUG
-        //cout << "|V| = " << vertex_count << " |E| = " << number_count / 2 << " adj: " << number_count << " lvl2adj: " << number_of_lvl2adj << endl;
-        //for (int i = 0; i < vertex_count; i++) {
-        //    cout << i << ": " << flush;
-        //    for (int j = onehop_offsets[i]; j < onehop_offsets[i + 1]; j++) {
-        //        cout << onehop_neighbors[j] << " " << flush;
-        //    }
-        //    cout << endl;
-        //}
-        //cout << "!!!" << endl;
-        //for (int i = 0; i < vertex_count; i++) {
-        //    cout << i << ": " << flush;
-        //    for (int j = twohop_offsets[i]; j < twohop_offsets[i + 1]; j++) {
-        //        cout << twohop_neighbors[j] << " " << flush;
-        //    }
-        //    cout << endl;
-        //}
+        if (DEBUG_TOGGLE) {
+            cout << "|V| = " << vertex_count << " |E| = " << number_count / 2 << " lvl1adj: " << number_count << " lvl2adj: " << number_of_lvl2adj << endl;
+        }
+        if (false) {
+            cout << graph_text << "\n!!!" << endl;
+            for (int i = 0; i < vertex_count; i++) {
+                cout << i << ": " << flush;
+                for (int j = onehop_offsets[i]; j < onehop_offsets[i + 1]; j++) {
+                    cout << onehop_neighbors[j] << " " << flush;
+                }
+                cout << endl;
+            }
+            cout << "!!!" << endl;
+            for (int i = 0; i < vertex_count; i++) {
+                cout << i << ": " << flush;
+                for (int j = twohop_offsets[i]; j < twohop_offsets[i + 1]; j++) {
+                    cout << twohop_neighbors[j] << " " << flush;
+                }
+                cout << endl;
+            }
+        }
 
         delete twohop_flag_DIA;
     }
@@ -483,8 +508,8 @@ int* minimum_degrees;
 int main(int argc, char* argv[])
 {
     // ENSURE PROPER USAGE
-    if (argc != 7) {
-        printf("Usage: ./main <graph_file> <gamma> <min_size> <output_file.txt> <number of vertices> <number of edges>\n");
+    if (argc != 5) {
+        printf("Usage: ./main <graph_file> <gamma> <min_size> <output_file.txt>\n");
         return 1;
     }
     ifstream graph_stream(argv[1], ios::in);
@@ -502,19 +527,13 @@ int main(int argc, char* argv[])
         printf("minimum size must be greater than 1\n");
         return 1;
     }
-    int num_vert = atoi(argv[4]);
-    int num_cand = atoi(argv[5]);
-    if (num_vert < 0 || num_vert > 100000000 || num_cand < 0 || num_cand > 100000000) {
-        printf("vertices and edges must be greater than 0 and less than 100.000.000\n");
-        return 1;
-    }
 
     // TIME
     auto start = std::chrono::high_resolution_clock::now();
 
     // GRAPH / MINDEGS
     cout << ">:PRE-PROCESSING" << endl;
-    CPU_Graph hg(graph_stream, num_vert, num_cand);
+    CPU_Graph hg(graph_stream);
     graph_stream.close();
     calculate_minimum_degrees(hg);
     ofstream temp_results("temp.txt");
@@ -528,7 +547,7 @@ int main(int argc, char* argv[])
     temp_results.close();
 
     // RM NON-MAX
-    RemoveNonMax("temp.txt", argv[6]);
+    RemoveNonMax("temp.txt", argv[4]);
 
     // TIME
     auto stop = std::chrono::high_resolution_clock::now();
@@ -569,7 +588,9 @@ void search(CPU_Graph& hg, ofstream& temp_results)
     initialize_tasks(hg, hd);
 
     // DEBUG
-    //h_print_Data_Sizes(hd, hc);
+    if (DEBUG_TOGGLE) {
+        h_print_Data_Sizes(hd, hc);
+    }
     //print_CPU_Data(hd);
 
     // CPU EXPANSION
@@ -584,7 +605,9 @@ void search(CPU_Graph& hg, ofstream& temp_results)
         }
 
         // DEBUG
-        //h_print_Data_Sizes(hd, hc);
+        if (DEBUG_TOGGLE) {
+            h_print_Data_Sizes(hd, hc);
+        }
         //print_CPU_Data(hd);
     }
 
@@ -616,7 +639,9 @@ void search(CPU_Graph& hg, ofstream& temp_results)
         // DEBUG
         //print_WClique_Buffers(dd);
         //print_WTask_Buffers(dd);
-        //if (print_Warp_Data_Sizes_Every(dd, 1)) { break; }
+        if (DEBUG_TOGGLE) {
+            if (print_Warp_Data_Sizes_Every(dd, 1)) { break; }
+        }
         //print_All_Warp_Data_Sizes_Every(dd, 1);
 
         // consolidate all the warp tasks/cliques buffers into the next global tasks array, buffer, and cliques
@@ -639,7 +664,9 @@ void search(CPU_Graph& hg, ofstream& temp_results)
         // DEBUG
         //print_GPU_Data(dd);
         //print_GPU_Cliques(dd);
-        //print_Data_Sizes_Every(dd, 1); printf("\n");
+        if (DEBUG_TOGGLE) {
+            print_Data_Sizes_Every(dd, 1); printf("\n");
+        }
         //print_debug(dd);
         //print_idebug(dd);
         //break;
