@@ -58,7 +58,7 @@ using namespace std;
 #define CPU_LEVELS_x2 0
 
 // debug toggle
-#define DEBUG_TOGGLE 0
+#define DEBUG_TOGGLE 1
 
 // VERTEX DATA
 struct Vertex
