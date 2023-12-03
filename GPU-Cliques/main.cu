@@ -471,8 +471,15 @@ __device__ void d_print_vertices(Vertex* vertices, int size);
 
 
 
+// - branch new changes off and revert to older version
+// - find bugs that occur on cheaha
+// - exact cpu level count and size control
+
 // - changing wtasks_size has unpredictable results
 // - revert cpu level changes and see if bugs still occur
+// - add seperate cpu and  gpu expand thresholds
+// - gpu code is probably wrong, get wrong result with less cpu levels
+// - diff check wrong results to find extra
 
 // TODO GENERALLY
 // - test program on larger graphs
