@@ -26,7 +26,7 @@ using namespace std;
 
 // global memory size: 1.500.000.000 ints
 #define TASKS_SIZE 2000000
-#define EXPAND_THRESHOLD 704
+#define EXPAND_THRESHOLD 352
 #define BUFFER_SIZE 100000000
 #define BUFFER_OFFSET_SIZE 1000000
 #define CLIQUES_SIZE 2000000
@@ -43,19 +43,21 @@ using namespace std;
 #define WCLIQUES_OFFSET_SIZE 500
 #define WTASKS_SIZE 50000
 #define WTASKS_OFFSET_SIZE 5000
-#define WVERTICES_SIZE 3200
-#define WADJACENCIES_SIZE 320
+// TODO - add check in code to make sure these are large enough
+// should be a multiple of 32 as to not waste space
+#define WVERTICES_SIZE 32000
+#define WADJACENCIES_SIZE 3200
 
 // shared memory size: 12.300 ints
 #define VERTICES_SIZE 50
  
 // threads info
-#define BLOCK_SIZE 1024
+#define BLOCK_SIZE 512
 #define NUM_OF_BLOCKS 22
 #define WARP_SIZE 32
 
 // run settings
-#define CPU_LEVELS_x2 0
+#define CPU_LEVELS_x2 1
 
 // debug toggle
 #define DEBUG_TOGGLE 1
@@ -613,6 +615,21 @@ void search(CPU_Graph& hg, ofstream& temp_results)
             h_print_Data_Sizes(hd, hc);
         }
         //print_CPU_Data(hd);
+        if (false && *hd.current_level == 3) {
+            cout << endl << endl << "Tasks2: " << "Size: " << (*(hd.tasks2_count)) << endl;
+            cout << endl << "Offsets:" << endl;
+            for (uint64_t i = 0; i <= (*(hd.tasks2_count)); i++) {
+                cout << i << ":" << hd.tasks2_offset[i] << " ";
+            }
+            cout << endl << "Vertex:" << endl;
+            for (int i = 0; i < *hd.tasks2_count; i++) {
+                cout << i << ":";
+                for (int j = hd.tasks2_offset[i]; j < hd.tasks2_offset[i] + 3; j++) {
+                    cout << hd.tasks2_vertices[j].vertexid << " ";
+                }
+            }
+            cout << endl;
+        }
     }
 
     flush_cliques(hc, temp_results);
@@ -674,6 +691,32 @@ void search(CPU_Graph& hg, ofstream& temp_results)
         //print_debug(dd);
         //print_idebug(dd);
         //break;
+        int* current_level = new int;
+        chkerr(cudaMemcpy(current_level, dd.current_level, sizeof(int), cudaMemcpyDeviceToHost));
+        if (false && *current_level == 3) {
+            uint64_t* tasks2_count = new uint64_t;
+            uint64_t* tasks2_offset = new uint64_t[EXPAND_THRESHOLD + 1];
+            Vertex* tasks2_vertices = new Vertex[TASKS_SIZE];
+
+            chkerr(cudaMemcpy(tasks2_count, dd.tasks2_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
+            chkerr(cudaMemcpy(tasks2_offset, dd.tasks2_offset, (EXPAND_THRESHOLD + 1) * sizeof(uint64_t), cudaMemcpyDeviceToHost));
+            chkerr(cudaMemcpy(tasks2_vertices, dd.tasks2_vertices, (TASKS_SIZE) * sizeof(Vertex), cudaMemcpyDeviceToHost));
+
+            cout << endl << "Tasks2: " << "Size: " << (*tasks2_count) << endl;
+            cout << endl << "Offsets:" << endl;
+            for (int i = 0; i <= (*tasks2_count); i++) {
+                cout << i << ":" << tasks2_offset[i] << " " << flush;
+            }
+            cout << endl << "Vertex:" << endl;
+            for (int i = 0; i < *tasks2_count; i++) {
+                cout << i << ":";
+                for (int j = tasks2_offset[i]; j < tasks2_offset[i] + 3; j++) {
+                    cout << tasks2_vertices[j].vertexid << " ";
+                }
+            }
+            cout << endl;
+        }
+        delete current_level;
     }
 
     dump_cliques(hc, dd, temp_results);
@@ -1086,6 +1129,7 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc)
 
 
         // NEXT LEVEL
+        // TODO - should be num_covered + num_mem, works since only covered when 
         for (int j = number_of_covered; j < expansions; j++) {
 
 
@@ -1122,6 +1166,13 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc)
 
 
 
+            // DEBUG
+            if (vertices[0].vertexid == 136 && vertices[1].vertexid == 1606 && vertices[2].vertexid == 4755 && number_of_members == 2) {
+                print_vertices(vertices, total_vertices);
+            }
+
+
+
             // ADD ONE VERTEX
             method_return = h_add_one_vertex(hg, hd, vertices, total_vertices, number_of_candidates, number_of_members, upper_bound, lower_bound, min_ext_deg);
 
@@ -1146,14 +1197,6 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc)
             // CRITICAL VERTEX PRUNING
             //method_return = h_critical_vertex_pruning(hg, hd, vertices, total_vertices, number_of_candidates, number_of_members, upper_bound, lower_bound, min_ext_deg);
 
-            // continue if not enough vertices after pruning
-            if (method_return == 2) {
-                delete vertices;
-                continue;
-            }
-
-
-
 
 
             // CHECK FOR CLIQUE
@@ -1171,7 +1214,7 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc)
 
             // WRITE TO TASKS
             //sort vertices so that lowest degree vertices are first in enumeration order before writing to tasks
-            qsort(vertices + number_of_members, number_of_candidates, sizeof(Vertex), h_sort_vert_Q);
+            qsort(vertices, total_vertices, sizeof(Vertex), h_sort_vert_Q);
 
             // TODO - do we need this if?
             if (number_of_candidates > 0) {
@@ -1407,7 +1450,7 @@ int h_remove_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* read_vertices, int&
 
     int mindeg;
 
-    bool failed_found = false;
+    bool failed_found;
 
     // TODO - change vert is extendable to Quick check using mindeg
     mindeg = h_get_mindeg(num_mem);
@@ -1420,6 +1463,8 @@ int h_remove_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* read_vertices, int&
     for (int i = 0; i < tot_vert; i++) {
         hd.vertex_order_map[read_vertices[start + i].vertexid] = i;
     }
+
+    failed_found = false;
 
     // update info of vertices connected to removed cand
     pvertexid = read_vertices[start + tot_vert].vertexid;
@@ -1450,7 +1495,7 @@ int h_remove_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* read_vertices, int&
     return 0;
 }
 
-// returns 2 if too many vertices pruned to be considered, 1 if failed found or invalid bound, 0 otherwise
+// returns 1 if failed found or invalid bound, 0 otherwise
 int h_add_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_vertices, int& number_of_candidates, int& number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg)
 {
     // helper variables
@@ -2269,7 +2314,7 @@ int h_sort_vert(const void* a, const void* b)
 // update how this method looks
 int h_sort_vert_Q(const void* a, const void* b)
 {
-    // order is: covered -> cands -> cover
+    // order is: member -> covered -> cands -> cover
     // keys are: indeg -> exdeg -> lvl2adj -> vertexid
     
     Vertex* v1;
@@ -2278,7 +2323,11 @@ int h_sort_vert_Q(const void* a, const void* b)
     v1 = (Vertex*)a;
     v2 = (Vertex*)b;
 
-    if (v1->label == 2 && v2->label != 2)
+    if (v1->label == 1 && v2->label != 1)
+        return -1;
+    else if (v1->label != 1 && v2->label == 1)
+        return 1;
+    else if (v1->label == 2 && v2->label != 2)
         return -1;
     else if (v1->label != 2 && v2->label == 2)
         return 1;
@@ -3205,11 +3254,10 @@ __global__ void d_expand_level(GPU_Data dd)
             wd.tot_vert[ld.wib_idx] = wd.end[ld.wib_idx] - wd.start[ld.wib_idx];
             wd.num_mem[ld.wib_idx] = 0;
             for (uint64_t j = wd.start[ld.wib_idx]; j < wd.end[ld.wib_idx]; j++) {
-                if (ld.read_vertices[j].label == 1) {
-                    wd.num_mem[ld.wib_idx]++;
-                } else {
+                if (ld.read_vertices[j].label != 1) {
                     break;
                 }
+                wd.num_mem[ld.wib_idx]++;
             }
             wd.num_cand[ld.wib_idx] = wd.tot_vert[ld.wib_idx] - wd.num_mem[ld.wib_idx];
             wd.expansions[ld.wib_idx] = wd.num_cand[ld.wib_idx];
@@ -3269,7 +3317,12 @@ __global__ void d_expand_level(GPU_Data dd)
             }
             __syncwarp();
 
-            
+            if ((ld.idx % WARP_SIZE) == 0) {
+                // DEBUG
+                if (ld.vertices[0].vertexid == 136 && ld.vertices[1].vertexid == 1606 && ld.vertices[2].vertexid == 4755) {
+                    d_print_vertices(ld.vertices, wd.total_vertices[ld.wib_idx]);
+                }
+            }
 
             // ADD ONE VERTEX
             method_return = d_add_one_vertex(dd, wd, ld);
@@ -4518,7 +4571,7 @@ __device__ void d_sort_i(int* target, int size, int lane_idx, int (*func)(int, i
 // Quick enumeration order sort keys
 __device__ int d_sort_vert_Q(Vertex& v1, Vertex& v2)
 {
-    // order is: covered -> cands -> cover
+    // order is: member -> covered -> cands -> cover
     // keys are: indeg -> exdeg -> lvl2adj -> vertexid
 
     if (v1.label == 1 && v2.label != 1)
