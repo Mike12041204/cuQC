@@ -43,7 +43,6 @@ using namespace std;
 #define WCLIQUES_OFFSET_SIZE 500
 #define WTASKS_SIZE 50000
 #define WTASKS_OFFSET_SIZE 5000
-// make divisible by 32 to not waste space after integer division
 #define WVERTICES_SIZE 3200
 #define WADJACENCIES_SIZE 320
 
@@ -56,7 +55,7 @@ using namespace std;
 #define WARP_SIZE 32
 
 // run settings
-#define CPU_LEVELS_x2 1
+#define CPU_LEVELS_x2 0
 
 // debug toggle
 #define DEBUG_TOGGLE 1
@@ -601,7 +600,7 @@ void search(CPU_Graph& hg, ofstream& temp_results)
     // CPU EXPANSION
     // cpu levels is multiplied by two to ensure that data ends up in tasks1, this allows us to always copy tasks1 without worry like before hybrid cpu approach
     // cpu expand must be called atleast one time to handle first round cover pruning as the gpu code cannot do this
-    for (int i = 0; i < CPU_LEVELS_x2 + 1 && !(*hd.maximal_expansion); i++) {
+    for (int i = 0; i < 2 * (CPU_LEVELS_x2 + 1) && !(*hd.maximal_expansion); i++) {
         h_expand_level(hg, hd, hc);
     
         // if cliques is more than half full, flush to file
@@ -980,14 +979,14 @@ void initialize_tasks(CPU_Graph& hg, CPU_Data& hd)
     if (total_vertices > 0)
     {
         for (int j = 0; j < total_vertices; j++) {
-            hd.tasks2_vertices[j].vertexid = vertices[j].vertexid;
-            hd.tasks2_vertices[j].label = vertices[j].label;
-            hd.tasks2_vertices[j].indeg = vertices[j].indeg;
-            hd.tasks2_vertices[j].exdeg = vertices[j].exdeg;
-            hd.tasks2_vertices[j].lvl2adj = 0;
+            hd.tasks1_vertices[j].vertexid = vertices[j].vertexid;
+            hd.tasks1_vertices[j].label = vertices[j].label;
+            hd.tasks1_vertices[j].indeg = vertices[j].indeg;
+            hd.tasks1_vertices[j].exdeg = vertices[j].exdeg;
+            hd.tasks1_vertices[j].lvl2adj = 0;
         }
-        (*(hd.tasks2_count))++;
-        hd.tasks2_offset[(*(hd.tasks2_count))] = total_vertices;
+        (*(hd.tasks1_count))++;
+        hd.tasks1_offset[(*(hd.tasks1_count))] = total_vertices;
     }
 
     delete vertices;
@@ -1029,20 +1028,20 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc)
 
 
     if ((*hd.current_level) % 2 == 0) {
-        read_count = hd.tasks2_count;
-        read_offsets = hd.tasks2_offset;
-        read_vertices = hd.tasks2_vertices;
-        write_count = hd.tasks1_count;
-        write_offsets = hd.tasks1_offset;
-        write_vertices = hd.tasks1_vertices;
-    }
-    else {
         read_count = hd.tasks1_count;
         read_offsets = hd.tasks1_offset;
         read_vertices = hd.tasks1_vertices;
         write_count = hd.tasks2_count;
         write_offsets = hd.tasks2_offset;
         write_vertices = hd.tasks2_vertices;
+    }
+    else {
+        read_count = hd.tasks2_count;
+        read_offsets = hd.tasks2_offset;
+        read_vertices = hd.tasks2_vertices;
+        write_count = hd.tasks1_count;
+        write_offsets = hd.tasks1_offset;
+        write_vertices = hd.tasks1_vertices;
     }
     *write_count = 0;
     write_offsets[0] = 0;
@@ -1196,19 +1195,11 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc)
     (*hd.current_level)++;
 }
 
-// TODO - make this method dynamically select which tasks to transfer
 void move_to_gpu(CPU_Data& hd, GPU_Data& dd)
 {
-    if ((*hd.current_level) % 2 == 1) {
-        chkerr(cudaMemcpy(dd.tasks1_count, hd.tasks1_count, sizeof(uint64_t), cudaMemcpyHostToDevice));
-        chkerr(cudaMemcpy(dd.tasks1_offset, hd.tasks1_offset, (EXPAND_THRESHOLD + 1) * sizeof(uint64_t), cudaMemcpyHostToDevice));
-        chkerr(cudaMemcpy(dd.tasks1_vertices, hd.tasks1_vertices, (TASKS_SIZE) * sizeof(Vertex), cudaMemcpyHostToDevice));
-    }
-    else {
-        chkerr(cudaMemcpy(dd.tasks2_count, hd.tasks2_count, sizeof(uint64_t), cudaMemcpyHostToDevice));
-        chkerr(cudaMemcpy(dd.tasks2_offset, hd.tasks2_offset, (EXPAND_THRESHOLD + 1) * sizeof(uint64_t), cudaMemcpyHostToDevice));
-        chkerr(cudaMemcpy(dd.tasks2_vertices, hd.tasks2_vertices, (TASKS_SIZE) * sizeof(Vertex), cudaMemcpyHostToDevice));
-    }
+    chkerr(cudaMemcpy(dd.tasks1_count, hd.tasks1_count, sizeof(uint64_t), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(dd.tasks1_offset, hd.tasks1_offset, (EXPAND_THRESHOLD + 1) * sizeof(uint64_t), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(dd.tasks1_vertices, hd.tasks1_vertices, (TASKS_SIZE) * sizeof(Vertex), cudaMemcpyHostToDevice));
 
     chkerr(cudaMemcpy(dd.buffer_count, hd.buffer_count, sizeof(uint64_t), cudaMemcpyHostToDevice));
     chkerr(cudaMemcpy(dd.buffer_offset, hd.buffer_offset, (BUFFER_OFFSET_SIZE) * sizeof(uint64_t), cudaMemcpyHostToDevice));
@@ -3192,7 +3183,7 @@ __global__ void d_expand_level(GPU_Data dd)
     * buffer acts as a stack, in a last-in first-out manner, a subsection of the search space will be expanded until completion. This system allows the problem to essentially be divided into smaller problems and thus 
     * require less memory to handle.
     */
-    if ((*(dd.current_level)) % 2 == 1) {
+    if ((*(dd.current_level)) % 2 == 0) {
         ld.read_count = dd.tasks1_count;
         ld.read_offsets = dd.tasks1_offset;
         ld.read_vertices = dd.tasks1_vertices;
@@ -3324,7 +3315,6 @@ __global__ void d_expand_level(GPU_Data dd)
     }
 }
 
-// TODO - make conditionals within for loops into multiple for loops
 __global__ void transfer_buffers(GPU_Data dd)
 {
     // THREAD INFO
@@ -3345,7 +3335,7 @@ __global__ void transfer_buffers(GPU_Data dd)
     uint64_t* write_offsets;
     Vertex* write_vertices;
 
-    if ((*(dd.current_level)) % 2 == 1) {
+    if ((*(dd.current_level)) % 2 == 0) {
         write_count = dd.tasks2_count;
         write_offsets = dd.tasks2_offset;
         write_vertices = dd.tasks2_vertices;
@@ -3459,7 +3449,7 @@ __global__ void fill_from_buffer(GPU_Data dd)
     uint64_t* write_offsets;
     uint64_t* write_count;
 
-    if ((*(dd.current_level)) % 2 == 1) {
+    if ((*(dd.current_level)) % 2 == 0) {
         write_count = dd.tasks2_count;
         write_offsets = dd.tasks2_offset;
         write_vertices = dd.tasks2_vertices;
