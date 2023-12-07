@@ -26,7 +26,7 @@ using namespace std;
 
 // global memory size: 1.500.000.000 ints
 #define TASKS_SIZE 2000000
-#define EXPAND_THRESHOLD 352
+#define EXPAND_THRESHOLD 44
 #define BUFFER_SIZE 100000000
 #define BUFFER_OFFSET_SIZE 1000000
 #define CLIQUES_SIZE 2000000
@@ -45,14 +45,14 @@ using namespace std;
 #define WTASKS_OFFSET_SIZE 5000
 // TODO - add check in code to make sure these are large enough
 // should be a multiple of 32 as to not waste space
-#define WVERTICES_SIZE 32000
-#define WADJACENCIES_SIZE 3200
+#define WVERTICES_SIZE 3200
+#define WADJACENCIES_SIZE 320
 
 // shared memory size: 12.300 ints
 #define VERTICES_SIZE 50
  
 // threads info
-#define BLOCK_SIZE 512
+#define BLOCK_SIZE 64
 #define NUM_OF_BLOCKS 22
 #define WARP_SIZE 32
 
@@ -472,22 +472,15 @@ __device__ void d_print_vertices(Vertex* vertices, int size);
 
 
 
-// - branch new changes off and revert to older version
-// - find bugs that occur on cheaha
-// - exact cpu level count and size control
-
-// - changing wtasks_size has unpredictable results
-// - revert cpu level changes and see if bugs still occur
-// - add seperate cpu and  gpu expand thresholds
-// - gpu code is probably wrong, get wrong result with less cpu levels
-// - diff check wrong results to find extra
-
-// TODO GENERALLY
+// TODO (GENERALLY)
 // - test program on larger graphs
 // - try different datasets besides hyves
 
 // TODO (HIGH PRIORITY)
+// - find why there is a different between cpu and gpu code
+// - exact cpu level count and size control
 // - debug errors when running on larger graphs
+// - changing wtasks size causes unpredictable results
 // - critical vertex on cpu and gpu
 
 // TODO (LOW PRIORITY)
@@ -1166,13 +1159,6 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc)
 
 
 
-            // DEBUG
-            if (vertices[0].vertexid == 136 && vertices[1].vertexid == 1606 && vertices[2].vertexid == 4755 && number_of_members == 2) {
-                print_vertices(vertices, total_vertices);
-            }
-
-
-
             // ADD ONE VERTEX
             method_return = h_add_one_vertex(hg, hd, vertices, total_vertices, number_of_candidates, number_of_members, upper_bound, lower_bound, min_ext_deg);
 
@@ -1748,9 +1734,27 @@ bool h_degree_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_
 
     qsort(hd.candidate_indegs, (*hd.remaining_count), sizeof(int), h_sort_desc);
 
+    // DEBUG
+    if (vertices[0].vertexid == 136 && vertices[1].vertexid == 1606 && vertices[2].vertexid == 4755 && number_of_members == 3) {
+        for (int i = 0; i < *hd.remaining_count; i++) {
+            cout << hd.candidate_indegs[i] << " " << flush;
+        }
+        cout << endl;
+    }
+
     // if invalid bounds found while calculating lower and upper bounds
     if (h_calculate_LU_bounds(hd, upper_bound, lower_bound, min_ext_deg, vertices, number_of_members, (*hd.remaining_count))) {
+        // DEBUG
+        if (vertices[0].vertexid == 136 && vertices[1].vertexid == 1606 && vertices[2].vertexid == 4755 && number_of_members == 3) {
+            cout << "U:" << upper_bound << "L:" << lower_bound << "M:" << min_ext_deg << " !!!" << endl;
+        }
         return true;
+    }
+    // DEBUG
+    else {
+        if (vertices[0].vertexid == 136 && vertices[1].vertexid == 1606 && vertices[2].vertexid == 4755 && number_of_members == 3) {
+            cout << "U:" << upper_bound << " L:" << lower_bound << " M:" << min_ext_deg << endl;
+        }
     }
 
     // check for failed vertices
@@ -1771,6 +1775,14 @@ bool h_degree_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_
         else {
             hd.removed_candidates[(*hd.removed_count)++] = i;
         }
+    }
+
+    // DEBUG
+    if (vertices[0].vertexid == 136 && vertices[1].vertexid == 1606 && vertices[2].vertexid == 4755 && number_of_members == 3) {
+        for (int i = 0; i < *hd.remaining_count; i++) {
+            cout << vertices[hd.remaining_candidates[i]].vertexid << " " << flush;
+        }
+        cout << endl;
     }
 
     while ((*hd.remaining_count) > 0 && (*hd.removed_count) > 0) {
@@ -1819,9 +1831,27 @@ bool h_degree_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_
 
         qsort(hd.candidate_indegs, num_val_cands, sizeof(int), h_sort_desc);
 
+        // DEBUG
+        if (vertices[0].vertexid == 136 && vertices[1].vertexid == 1606 && vertices[2].vertexid == 4755 && number_of_members == 3) {
+            for (int i = 0; i < num_val_cands; i++) {
+                cout << hd.candidate_indegs[i] << " " << flush;
+            }
+            cout << endl;
+        }
+
         // if invalid bounds found while calculating lower and upper bounds
         if (h_calculate_LU_bounds(hd, upper_bound, lower_bound, min_ext_deg, vertices, number_of_members, num_val_cands)) {
+            // DEBUG - bug task gets pruned here
+            if (vertices[0].vertexid == 136 && vertices[1].vertexid == 1606 && vertices[2].vertexid == 4755 && number_of_members == 3) {
+                cout << "U:" << upper_bound << " L:" << lower_bound << " M:" << min_ext_deg << " !!!" << endl;
+            }
             return true;
+        }
+        // DEBUG
+        else {
+            if (vertices[0].vertexid == 136 && vertices[1].vertexid == 1606 && vertices[2].vertexid == 4755 && number_of_members == 3) {
+                cout << "U:" << upper_bound << " L:" << lower_bound << " M:" << min_ext_deg << endl;
+            }
         }
 
         // check for failed vertices
@@ -3317,13 +3347,6 @@ __global__ void d_expand_level(GPU_Data dd)
             }
             __syncwarp();
 
-            if ((ld.idx % WARP_SIZE) == 0) {
-                // DEBUG
-                if (ld.vertices[0].vertexid == 136 && ld.vertices[1].vertexid == 1606 && ld.vertices[2].vertexid == 4755) {
-                    d_print_vertices(ld.vertices, wd.total_vertices[ld.wib_idx]);
-                }
-            }
-
             // ADD ONE VERTEX
             method_return = d_add_one_vertex(dd, wd, ld);
 
@@ -3791,10 +3814,28 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
     d_sort_i(dd.candidate_indegs + (WVERTICES_SIZE * (ld.idx / WARP_SIZE)), wd.remaining_count[ld.wib_idx], (ld.idx % WARP_SIZE), d_sort_degs);
 
+    // DEBUG - GPU is same as CPU at this point
+    if (ld.idx % WARP_SIZE == 0 && ld.vertices[0].vertexid == 136 && ld.vertices[1].vertexid == 1606 && ld.vertices[2].vertexid == 4755 && wd.number_of_members[ld.wib_idx] == 3) {
+        //for (int i = 0; i < wd.remaining_count[ld.wib_idx]; i++) {
+        //    printf("%i ", dd.candidate_indegs[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + i]);
+        //}
+        //printf("\n");
+    }
+
     // UNSURE - can we just set number of candidates and remaining count
     d_calculate_LU_bounds(dd, wd, ld, wd.remaining_count[ld.wib_idx]);
     if (wd.invalid_bounds[ld.wib_idx]) {
+        // DEBUG
+        if (ld.idx % WARP_SIZE == 0 && ld.vertices[0].vertexid == 136 && ld.vertices[1].vertexid == 1606 && ld.vertices[2].vertexid == 4755 && wd.number_of_members[ld.wib_idx] == 3) {
+            printf("U:%i L:%i M:%i !!!\n", wd.upper_bound[ld.wib_idx], wd.lower_bound[ld.wib_idx], wd.min_ext_deg[ld.wib_idx]);
+        }
         return true;
+    }
+    // DEBUG
+    else {
+        if (ld.idx % WARP_SIZE == 0 && ld.vertices[0].vertexid == 136 && ld.vertices[1].vertexid == 1606 && ld.vertices[2].vertexid == 4755 && wd.number_of_members[ld.wib_idx] == 3) {
+            printf("U:%i L:%i M:%i\n", wd.upper_bound[ld.wib_idx], wd.lower_bound[ld.wib_idx], wd.min_ext_deg[ld.wib_idx]);
+        }
     }
 
     // check for failed vertices
@@ -3866,6 +3907,16 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
         }
     }
     __syncwarp();
+
+
+
+    // DEBUG - same as CPU code here
+    if (ld.idx % WARP_SIZE == 0 && ld.vertices[0].vertexid == 136 && ld.vertices[1].vertexid == 1606 && ld.vertices[2].vertexid == 4755 && wd.number_of_members[ld.wib_idx] == 3) {
+        for (int i = 0; i < wd.remaining_count[ld.wib_idx]; i++) {
+            printf("%i ", dd.remaining_candidates[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + i]);
+        }
+        printf("\n");
+    }
 
 
     
@@ -3982,10 +4033,28 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
             d_sort_i(dd.candidate_indegs + (WVERTICES_SIZE * (ld.idx / WARP_SIZE)), wd.num_val_cands[ld.wib_idx], (ld.idx % WARP_SIZE), d_sort_degs);
 
+            // DEBUG
+            if (ld.idx % WARP_SIZE == 0 && ld.vertices[0].vertexid == 136 && ld.vertices[1].vertexid == 1606 && ld.vertices[2].vertexid == 4755 && wd.number_of_members[ld.wib_idx] == 3) {
+                for (int i = 0; i < wd.num_val_cands[ld.wib_idx]; i++) {
+                    printf("%i ", dd.candidate_indegs[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + i]);
+                }
+                printf("!!!!!\n");
+            }
+
             // UNSURE - can we just set number of candidates and num val cands
             d_calculate_LU_bounds(dd, wd, ld, wd.num_val_cands[ld.wib_idx]);
             if (wd.invalid_bounds[ld.wib_idx]) {
+                // DEBUG
+                if (ld.idx % WARP_SIZE == 0 && ld.vertices[0].vertexid == 136 && ld.vertices[1].vertexid == 1606 && ld.vertices[2].vertexid == 4755 && wd.number_of_members[ld.wib_idx] == 3) {
+                    printf("U:%i L:%i M:%i !!!\n", wd.upper_bound[ld.wib_idx], wd.lower_bound[ld.wib_idx], wd.min_ext_deg[ld.wib_idx]);
+                }
                 return true;
+            }
+            // DEBUG
+            else {
+                if (ld.idx % WARP_SIZE == 0 && ld.vertices[0].vertexid == 136 && ld.vertices[1].vertexid == 1606 && ld.vertices[2].vertexid == 4755 && wd.number_of_members[ld.wib_idx] == 3) {
+                    printf("U:%i L:%i M:%i\n", wd.upper_bound[ld.wib_idx], wd.lower_bound[ld.wib_idx], wd.min_ext_deg[ld.wib_idx]);
+                }
             }
 
             // check for failed vertices
@@ -4161,10 +4230,28 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
             d_sort_i(dd.candidate_indegs + (WVERTICES_SIZE * (ld.idx / WARP_SIZE)), wd.num_val_cands[ld.wib_idx], (ld.idx % WARP_SIZE), d_sort_degs);
 
+            // DEBUG
+            if (ld.idx % WARP_SIZE == 0 && ld.vertices[0].vertexid == 136 && ld.vertices[1].vertexid == 1606 && ld.vertices[2].vertexid == 4755 && wd.number_of_members[ld.wib_idx] == 3) {
+                for (int i = 0; i < wd.num_val_cands[ld.wib_idx]; i++) {
+                    printf("%i ", dd.candidate_indegs[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + i]);
+                }
+                printf("!!!!!\n");
+            }
+
             // UNSURE - can we just set number of candidates and num val cands
             d_calculate_LU_bounds(dd, wd, ld, wd.num_val_cands[ld.wib_idx]);
             if (wd.invalid_bounds[ld.wib_idx]) {
+                // DEBUG
+                if (ld.idx % WARP_SIZE == 0 && ld.vertices[0].vertexid == 136 && ld.vertices[1].vertexid == 1606 && ld.vertices[2].vertexid == 4755 && wd.number_of_members[ld.wib_idx] == 3) {
+                    printf("U:%i L:%i M:%i !!!\n", wd.upper_bound[ld.wib_idx], wd.lower_bound[ld.wib_idx], wd.min_ext_deg[ld.wib_idx]);
+                }
                 return true;
+            }
+            // DEBUG
+            else {
+                if (ld.idx % WARP_SIZE == 0 && ld.vertices[0].vertexid == 136 && ld.vertices[1].vertexid == 1606 && ld.vertices[2].vertexid == 4755 && wd.number_of_members[ld.wib_idx] == 3) {
+                    printf("U:%i L:%i M:%i\n", wd.upper_bound[ld.wib_idx], wd.lower_bound[ld.wib_idx], wd.min_ext_deg[ld.wib_idx]);
+                }
             }
 
             // check for failed vertices
