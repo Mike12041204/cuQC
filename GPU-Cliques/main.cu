@@ -26,7 +26,7 @@ using namespace std;
 
 // global memory size: 1.500.000.000 ints
 #define TASKS_SIZE 2000000
-#define EXPAND_THRESHOLD 44
+#define EXPAND_THRESHOLD 704
 #define BUFFER_SIZE 100000000
 #define BUFFER_OFFSET_SIZE 1000000
 #define CLIQUES_SIZE 2000000
@@ -43,21 +43,20 @@ using namespace std;
 #define WCLIQUES_OFFSET_SIZE 500
 #define WTASKS_SIZE 50000
 #define WTASKS_OFFSET_SIZE 5000
-// TODO - add check in code to make sure these are large enough
 // should be a multiple of 32 as to not waste space
 #define WVERTICES_SIZE 3200
-#define WADJACENCIES_SIZE 320
 
 // shared memory size: 12.300 ints
 #define VERTICES_SIZE 50
  
 // threads info
-#define BLOCK_SIZE 64
+#define BLOCK_SIZE 1024
 #define NUM_OF_BLOCKS 22
 #define WARP_SIZE 32
 
-// run settings
-#define CPU_LEVELS_x2 1
+// cpu settings
+#define CPU_LEVELS 3
+#define CPU_EXPAND_THRESHOLD 100
 
 // debug toggle
 #define DEBUG_TOGGLE 1
@@ -74,6 +73,7 @@ struct Vertex
 
 // CPU GRAPH / CONSTRUCTOR
 int h_sort_asce(const void* a, const void* b);
+bool memory_error = false;
 class CPU_Graph
 {
     public:
@@ -194,6 +194,10 @@ class CPU_Graph
         // DEBUG
         if (DEBUG_TOGGLE) {
             cout << "|V| = " << vertex_count << " |E| = " << number_count / 2 << " lvl1adj: " << number_count << " lvl2adj: " << number_of_lvl2adj << endl;
+
+            if (vertex_count > OFFSETS_SIZE || number_count > LVL1ADJ_SIZE || number_of_lvl2adj > LVL2ADJ_SIZE) {
+                memory_error = true;
+            }
         }
         if (false) {
             cout << graph_text << "\n!!!" << endl;
@@ -427,10 +431,10 @@ void print_WTask_Buffers(GPU_Data& dd);
 void print_WClique_Buffers(GPU_Data& dd);
 void print_GPU_Cliques(GPU_Data& dd);
 void print_CPU_Cliques(CPU_Cliques& hc);
-void print_Data_Sizes(GPU_Data& dd);
-void h_print_Data_Sizes(CPU_Data& hd, CPU_Cliques& hc);
+bool print_Data_Sizes(GPU_Data& dd);
+bool h_print_Data_Sizes(CPU_Data& hd, CPU_Cliques& hc);
 void print_vertices(Vertex* vertices, int size);
-void print_Data_Sizes_Every(GPU_Data& dd, int every);
+bool print_Data_Sizes_Every(GPU_Data& dd, int every);
 bool print_Warp_Data_Sizes(GPU_Data& dd);
 void print_All_Warp_Data_Sizes(GPU_Data& dd);
 bool print_Warp_Data_Sizes_Every(GPU_Data& dd, int every);
@@ -477,8 +481,7 @@ __device__ void d_print_vertices(Vertex* vertices, int size);
 // - try different datasets besides hyves
 
 // TODO (HIGH PRIORITY)
-// - find why there is a different between cpu and gpu code
-// - exact cpu level count and size control
+// - exact cpu level size control
 // - debug errors when running on larger graphs
 // - changing wtasks size causes unpredictable results
 // - critical vertex on cpu and gpu
@@ -493,6 +496,7 @@ __device__ void d_print_vertices(Vertex* vertices, int size);
 // - dont need lvl2adj in all places anymore
 // - way to skip early levels for smaller graphs to decrease CPU time
 // - improve sorting algorithm
+// - sort rather than qsort?
 
 
 
@@ -538,6 +542,9 @@ int main(int argc, char* argv[])
     ofstream temp_results("temp.txt");
 
     // DEBUG
+    if (DEBUG_TOGGLE && memory_error) {
+        cout << "!!! GRAPH ARRAY ERROR !!!" << endl;
+    }
     //print_CPU_Graph(hg);
 
     // SEARCH
@@ -588,14 +595,14 @@ void search(CPU_Graph& hg, ofstream& temp_results)
 
     // DEBUG
     if (DEBUG_TOGGLE) {
-        h_print_Data_Sizes(hd, hc);
+        if (h_print_Data_Sizes(hd, hc)) { return; }
     }
     //print_CPU_Data(hd);
 
     // CPU EXPANSION
     // cpu levels is multiplied by two to ensure that data ends up in tasks1, this allows us to always copy tasks1 without worry like before hybrid cpu approach
     // cpu expand must be called atleast one time to handle first round cover pruning as the gpu code cannot do this
-    for (int i = 0; i < 2 * (CPU_LEVELS_x2 + 1) && !(*hd.maximal_expansion); i++) {
+    for (int i = 0; i < CPU_LEVELS + 1 && !(*hd.maximal_expansion); i++) {
         h_expand_level(hg, hd, hc);
     
         // if cliques is more than half full, flush to file
@@ -606,22 +613,6 @@ void search(CPU_Graph& hg, ofstream& temp_results)
         // DEBUG
         if (DEBUG_TOGGLE) {
             h_print_Data_Sizes(hd, hc);
-        }
-        //print_CPU_Data(hd);
-        if (false && *hd.current_level == 3) {
-            cout << endl << endl << "Tasks2: " << "Size: " << (*(hd.tasks2_count)) << endl;
-            cout << endl << "Offsets:" << endl;
-            for (uint64_t i = 0; i <= (*(hd.tasks2_count)); i++) {
-                cout << i << ":" << hd.tasks2_offset[i] << " ";
-            }
-            cout << endl << "Vertex:" << endl;
-            for (int i = 0; i < *hd.tasks2_count; i++) {
-                cout << i << ":";
-                for (int j = hd.tasks2_offset[i]; j < hd.tasks2_offset[i] + 3; j++) {
-                    cout << hd.tasks2_vertices[j].vertexid << " ";
-                }
-            }
-            cout << endl;
         }
     }
 
@@ -651,11 +642,11 @@ void search(CPU_Graph& hg, ofstream& temp_results)
         cudaDeviceSynchronize();
 
         // DEBUG
-        //print_WClique_Buffers(dd);
-        //print_WTask_Buffers(dd);
         if (DEBUG_TOGGLE) {
             if (print_Warp_Data_Sizes_Every(dd, 1)) { break; }
         }
+        //print_WClique_Buffers(dd);
+        //print_WTask_Buffers(dd);
         //print_All_Warp_Data_Sizes_Every(dd, 1);
 
         // consolidate all the warp tasks/cliques buffers into the next global tasks array, buffer, and cliques
@@ -676,45 +667,17 @@ void search(CPU_Graph& hg, ofstream& temp_results)
         }
 
         // DEBUG
+        if (DEBUG_TOGGLE) {
+            if (print_Data_Sizes_Every(dd, 1)) { break; }
+        }
         //print_GPU_Data(dd);
         //print_GPU_Cliques(dd);
-        if (DEBUG_TOGGLE) {
-            print_Data_Sizes_Every(dd, 1); printf("\n");
-        }
         //print_debug(dd);
         //print_idebug(dd);
-        //break;
-        int* current_level = new int;
-        chkerr(cudaMemcpy(current_level, dd.current_level, sizeof(int), cudaMemcpyDeviceToHost));
-        if (false && *current_level == 3) {
-            uint64_t* tasks2_count = new uint64_t;
-            uint64_t* tasks2_offset = new uint64_t[EXPAND_THRESHOLD + 1];
-            Vertex* tasks2_vertices = new Vertex[TASKS_SIZE];
-
-            chkerr(cudaMemcpy(tasks2_count, dd.tasks2_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
-            chkerr(cudaMemcpy(tasks2_offset, dd.tasks2_offset, (EXPAND_THRESHOLD + 1) * sizeof(uint64_t), cudaMemcpyDeviceToHost));
-            chkerr(cudaMemcpy(tasks2_vertices, dd.tasks2_vertices, (TASKS_SIZE) * sizeof(Vertex), cudaMemcpyDeviceToHost));
-
-            cout << endl << "Tasks2: " << "Size: " << (*tasks2_count) << endl;
-            cout << endl << "Offsets:" << endl;
-            for (int i = 0; i <= (*tasks2_count); i++) {
-                cout << i << ":" << tasks2_offset[i] << " " << flush;
-            }
-            cout << endl << "Vertex:" << endl;
-            for (int i = 0; i < *tasks2_count; i++) {
-                cout << i << ":";
-                for (int j = tasks2_offset[i]; j < tasks2_offset[i] + 3; j++) {
-                    cout << tasks2_vertices[j].vertexid << " ";
-                }
-            }
-            cout << endl;
-        }
-        delete current_level;
     }
 
     dump_cliques(hc, dd, temp_results);
 
-    // FREE MEMORY
     free_memory(hd, dd, hc);
 }
 
@@ -982,7 +945,7 @@ void initialize_tasks(CPU_Graph& hg, CPU_Data& hd)
 
     
     // FIRST ROUND COVER PRUNING
-        // find cover vertex
+    // find cover vertex
     maximum_degree = 0;
     maximum_degree_index = 0;
     for (int i = 0; i < total_vertices; i++) {
@@ -1226,9 +1189,16 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc)
 
 void move_to_gpu(CPU_Data& hd, GPU_Data& dd)
 {
-    chkerr(cudaMemcpy(dd.tasks1_count, hd.tasks1_count, sizeof(uint64_t), cudaMemcpyHostToDevice));
-    chkerr(cudaMemcpy(dd.tasks1_offset, hd.tasks1_offset, (EXPAND_THRESHOLD + 1) * sizeof(uint64_t), cudaMemcpyHostToDevice));
-    chkerr(cudaMemcpy(dd.tasks1_vertices, hd.tasks1_vertices, (TASKS_SIZE) * sizeof(Vertex), cudaMemcpyHostToDevice));
+    if (CPU_LEVELS % 2 == 1) {
+        chkerr(cudaMemcpy(dd.tasks1_count, hd.tasks1_count, sizeof(uint64_t), cudaMemcpyHostToDevice));
+        chkerr(cudaMemcpy(dd.tasks1_offset, hd.tasks1_offset, (EXPAND_THRESHOLD + 1) * sizeof(uint64_t), cudaMemcpyHostToDevice));
+        chkerr(cudaMemcpy(dd.tasks1_vertices, hd.tasks1_vertices, (TASKS_SIZE) * sizeof(Vertex), cudaMemcpyHostToDevice));
+    }
+    else {
+        chkerr(cudaMemcpy(dd.tasks2_count, hd.tasks2_count, sizeof(uint64_t), cudaMemcpyHostToDevice));
+        chkerr(cudaMemcpy(dd.tasks2_offset, hd.tasks2_offset, (EXPAND_THRESHOLD + 1) * sizeof(uint64_t), cudaMemcpyHostToDevice));
+        chkerr(cudaMemcpy(dd.tasks2_vertices, hd.tasks2_vertices, (TASKS_SIZE) * sizeof(Vertex), cudaMemcpyHostToDevice));
+    }
 
     chkerr(cudaMemcpy(dd.buffer_count, hd.buffer_count, sizeof(uint64_t), cudaMemcpyHostToDevice));
     chkerr(cudaMemcpy(dd.buffer_offset, hd.buffer_offset, (BUFFER_OFFSET_SIZE) * sizeof(uint64_t), cudaMemcpyHostToDevice));
@@ -1734,27 +1704,9 @@ bool h_degree_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_
 
     qsort(hd.candidate_indegs, (*hd.remaining_count), sizeof(int), h_sort_desc);
 
-    // DEBUG
-    if (vertices[0].vertexid == 136 && vertices[1].vertexid == 1606 && vertices[2].vertexid == 4755 && number_of_members == 3) {
-        for (int i = 0; i < *hd.remaining_count; i++) {
-            cout << hd.candidate_indegs[i] << " " << flush;
-        }
-        cout << endl;
-    }
-
     // if invalid bounds found while calculating lower and upper bounds
     if (h_calculate_LU_bounds(hd, upper_bound, lower_bound, min_ext_deg, vertices, number_of_members, (*hd.remaining_count))) {
-        // DEBUG
-        if (vertices[0].vertexid == 136 && vertices[1].vertexid == 1606 && vertices[2].vertexid == 4755 && number_of_members == 3) {
-            cout << "U:" << upper_bound << "L:" << lower_bound << "M:" << min_ext_deg << " !!!" << endl;
-        }
         return true;
-    }
-    // DEBUG
-    else {
-        if (vertices[0].vertexid == 136 && vertices[1].vertexid == 1606 && vertices[2].vertexid == 4755 && number_of_members == 3) {
-            cout << "U:" << upper_bound << " L:" << lower_bound << " M:" << min_ext_deg << endl;
-        }
     }
 
     // check for failed vertices
@@ -1775,14 +1727,6 @@ bool h_degree_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_
         else {
             hd.removed_candidates[(*hd.removed_count)++] = i;
         }
-    }
-
-    // DEBUG
-    if (vertices[0].vertexid == 136 && vertices[1].vertexid == 1606 && vertices[2].vertexid == 4755 && number_of_members == 3) {
-        for (int i = 0; i < *hd.remaining_count; i++) {
-            cout << vertices[hd.remaining_candidates[i]].vertexid << " " << flush;
-        }
-        cout << endl;
     }
 
     while ((*hd.remaining_count) > 0 && (*hd.removed_count) > 0) {
@@ -1831,27 +1775,9 @@ bool h_degree_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_
 
         qsort(hd.candidate_indegs, num_val_cands, sizeof(int), h_sort_desc);
 
-        // DEBUG
-        if (vertices[0].vertexid == 136 && vertices[1].vertexid == 1606 && vertices[2].vertexid == 4755 && number_of_members == 3) {
-            for (int i = 0; i < num_val_cands; i++) {
-                cout << hd.candidate_indegs[i] << " " << flush;
-            }
-            cout << endl;
-        }
-
         // if invalid bounds found while calculating lower and upper bounds
         if (h_calculate_LU_bounds(hd, upper_bound, lower_bound, min_ext_deg, vertices, number_of_members, num_val_cands)) {
-            // DEBUG - bug task gets pruned here
-            if (vertices[0].vertexid == 136 && vertices[1].vertexid == 1606 && vertices[2].vertexid == 4755 && number_of_members == 3) {
-                cout << "U:" << upper_bound << " L:" << lower_bound << " M:" << min_ext_deg << " !!!" << endl;
-            }
             return true;
-        }
-        // DEBUG
-        else {
-            if (vertices[0].vertexid == 136 && vertices[1].vertexid == 1606 && vertices[2].vertexid == 4755 && number_of_members == 3) {
-                cout << "U:" << upper_bound << " L:" << lower_bound << " M:" << min_ext_deg << endl;
-            }
         }
 
         // check for failed vertices
@@ -2981,7 +2907,7 @@ void print_All_Warp_Data_Sizes(GPU_Data& dd)
 
 bool print_Warp_Data_Sizes_Every(GPU_Data& dd, int every)
 {
-    bool result;
+    bool result = false;
     int level;
     chkerr(cudaMemcpy(&level, dd.current_level, sizeof(int), cudaMemcpyDeviceToHost));
     if (level % every == 0) {
@@ -3017,16 +2943,18 @@ void print_idebug(GPU_Data& dd)
     chkerr(cudaMemset(dd.idebug, 0, sizeof(int)));
 }
 
-void print_Data_Sizes_Every(GPU_Data& dd, int every)
+bool print_Data_Sizes_Every(GPU_Data& dd, int every)
 {
+    bool result = false;
     int level;
     chkerr(cudaMemcpy(&level, dd.current_level, sizeof(int), cudaMemcpyDeviceToHost));
     if (level % every == 0) {
-        print_Data_Sizes(dd);
+        result = print_Data_Sizes(dd);
     }
+    return result;
 }
 
-void print_Data_Sizes(GPU_Data& dd)
+bool print_Data_Sizes(GPU_Data& dd)
 {
     uint64_t* current_level = new uint64_t;
     uint64_t* tasks1_count = new uint64_t;
@@ -3051,6 +2979,14 @@ void print_Data_Sizes(GPU_Data& dd)
     cout << "L: " << (*current_level) << " T1: " << (*tasks1_count) << " " << (*tasks1_size) << " T2: " << (*tasks2_count) << " " << (*tasks2_size) << " B: " << (*buffer_count) << " " << (*buffer_size) << " C: " << 
         (*cliques_count) << " " << (*cliques_size) << endl;
 
+    printf("\n");
+
+    if ((*tasks1_count) > EXPAND_THRESHOLD || (*tasks1_size) > TASKS_SIZE || (*tasks2_count) > EXPAND_THRESHOLD || (*tasks2_size) > TASKS_SIZE || (*buffer_count) > BUFFER_OFFSET_SIZE || (*buffer_size) > BUFFER_SIZE || (*cliques_count) > CLIQUES_OFFSET_SIZE ||
+        (*cliques_size) > CLIQUES_SIZE) {
+        cout << "!!! ARRAY SIZE ERROR !!!" << endl;
+        return true;
+    }
+
     delete current_level;
     delete tasks1_count;
     delete tasks2_count;
@@ -3060,13 +2996,22 @@ void print_Data_Sizes(GPU_Data& dd)
     delete tasks2_size;
     delete buffer_size;
     delete cliques_size;
+    
+    return false;
 }
 
-void h_print_Data_Sizes(CPU_Data& hd, CPU_Cliques& hc)
+bool h_print_Data_Sizes(CPU_Data& hd, CPU_Cliques& hc)
 {
     cout << "L: " << (*hd.current_level) << " T1: " << (*hd.tasks1_count) << " " << (*(hd.tasks1_offset + (*hd.tasks1_count))) << " T2: " << (*hd.tasks2_count) << " " << 
         (*(hd.tasks2_offset + (*hd.tasks2_count))) << " B: " << (*hd.buffer_count) << " " << (*(hd.buffer_offset + (*hd.buffer_count))) << " C: " << 
         (*hc.cliques_count) << " " << (*(hc.cliques_offset + (*hc.cliques_count))) << endl;
+
+    if ((*(hd.tasks1_offset + (*hd.tasks1_count))) > WVERTICES_SIZE) {
+        cout << "!!! VERTICES SIZE ERROR !!!" << endl;
+        return true;
+    }
+
+    return false;
 }
 
 void print_WTask_Buffers(GPU_Data& dd)
@@ -3814,28 +3759,10 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
     d_sort_i(dd.candidate_indegs + (WVERTICES_SIZE * (ld.idx / WARP_SIZE)), wd.remaining_count[ld.wib_idx], (ld.idx % WARP_SIZE), d_sort_degs);
 
-    // DEBUG - GPU is same as CPU at this point
-    if (ld.idx % WARP_SIZE == 0 && ld.vertices[0].vertexid == 136 && ld.vertices[1].vertexid == 1606 && ld.vertices[2].vertexid == 4755 && wd.number_of_members[ld.wib_idx] == 3) {
-        //for (int i = 0; i < wd.remaining_count[ld.wib_idx]; i++) {
-        //    printf("%i ", dd.candidate_indegs[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + i]);
-        //}
-        //printf("\n");
-    }
-
     // UNSURE - can we just set number of candidates and remaining count
     d_calculate_LU_bounds(dd, wd, ld, wd.remaining_count[ld.wib_idx]);
     if (wd.invalid_bounds[ld.wib_idx]) {
-        // DEBUG
-        if (ld.idx % WARP_SIZE == 0 && ld.vertices[0].vertexid == 136 && ld.vertices[1].vertexid == 1606 && ld.vertices[2].vertexid == 4755 && wd.number_of_members[ld.wib_idx] == 3) {
-            printf("U:%i L:%i M:%i !!!\n", wd.upper_bound[ld.wib_idx], wd.lower_bound[ld.wib_idx], wd.min_ext_deg[ld.wib_idx]);
-        }
         return true;
-    }
-    // DEBUG
-    else {
-        if (ld.idx % WARP_SIZE == 0 && ld.vertices[0].vertexid == 136 && ld.vertices[1].vertexid == 1606 && ld.vertices[2].vertexid == 4755 && wd.number_of_members[ld.wib_idx] == 3) {
-            printf("U:%i L:%i M:%i\n", wd.upper_bound[ld.wib_idx], wd.lower_bound[ld.wib_idx], wd.min_ext_deg[ld.wib_idx]);
-        }
     }
 
     // check for failed vertices
@@ -3901,22 +3828,12 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
         dd.remaining_candidates[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + lane_remaining_count + i] = ld.vertices[dd.lane_remaining_candidates[lane_write + i]];
     }
     // only need removed if going to be using removed to update degrees
-    if (wd.remaining_count[ld.wib_idx] > wd.removed_count[ld.wib_idx]) {
+    if (!(wd.remaining_count[ld.wib_idx] < wd.removed_count[ld.wib_idx])) {
         for (int i = 0; i < pvertexid; i++) {
             dd.removed_candidates[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + lane_removed_count + i] = ld.vertices[dd.lane_removed_candidates[lane_write + i]].vertexid;
         }
     }
     __syncwarp();
-
-
-
-    // DEBUG - same as CPU code here
-    if (ld.idx % WARP_SIZE == 0 && ld.vertices[0].vertexid == 136 && ld.vertices[1].vertexid == 1606 && ld.vertices[2].vertexid == 4755 && wd.number_of_members[ld.wib_idx] == 3) {
-        for (int i = 0; i < wd.remaining_count[ld.wib_idx]; i++) {
-            printf("%i ", dd.remaining_candidates[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + i]);
-        }
-        printf("\n");
-    }
 
 
     
@@ -3926,8 +3843,7 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
         if (wd.rw_counter[ld.wib_idx] % 2 == 0) {
             // update degrees
             if (wd.remaining_count[ld.wib_idx] < wd.removed_count[ld.wib_idx]) {
-                // via remaining
-                // reset exdegs
+                // via remaining, reset exdegs
                 for (int i = (ld.idx % WARP_SIZE); i < wd.number_of_members[ld.wib_idx]; i += WARP_SIZE) {
                     ld.vertices[i].exdeg = 0;
                 }
@@ -3967,8 +3883,7 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
                 }
             }
             else {
-                // via removed
-                // update exdeg based on remaining candidates
+                // via removed, update exdeg based on remaining candidates
                 for (int i = (ld.idx % WARP_SIZE); i < wd.number_of_members[ld.wib_idx]; i += WARP_SIZE) {
                     pvertexid = ld.vertices[i].vertexid;
 
@@ -4033,28 +3948,10 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
             d_sort_i(dd.candidate_indegs + (WVERTICES_SIZE * (ld.idx / WARP_SIZE)), wd.num_val_cands[ld.wib_idx], (ld.idx % WARP_SIZE), d_sort_degs);
 
-            // DEBUG
-            if (ld.idx % WARP_SIZE == 0 && ld.vertices[0].vertexid == 136 && ld.vertices[1].vertexid == 1606 && ld.vertices[2].vertexid == 4755 && wd.number_of_members[ld.wib_idx] == 3) {
-                for (int i = 0; i < wd.num_val_cands[ld.wib_idx]; i++) {
-                    printf("%i ", dd.candidate_indegs[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + i]);
-                }
-                printf("!!!!!\n");
-            }
-
             // UNSURE - can we just set number of candidates and num val cands
             d_calculate_LU_bounds(dd, wd, ld, wd.num_val_cands[ld.wib_idx]);
             if (wd.invalid_bounds[ld.wib_idx]) {
-                // DEBUG
-                if (ld.idx % WARP_SIZE == 0 && ld.vertices[0].vertexid == 136 && ld.vertices[1].vertexid == 1606 && ld.vertices[2].vertexid == 4755 && wd.number_of_members[ld.wib_idx] == 3) {
-                    printf("U:%i L:%i M:%i !!!\n", wd.upper_bound[ld.wib_idx], wd.lower_bound[ld.wib_idx], wd.min_ext_deg[ld.wib_idx]);
-                }
                 return true;
-            }
-            // DEBUG
-            else {
-                if (ld.idx % WARP_SIZE == 0 && ld.vertices[0].vertexid == 136 && ld.vertices[1].vertexid == 1606 && ld.vertices[2].vertexid == 4755 && wd.number_of_members[ld.wib_idx] == 3) {
-                    printf("U:%i L:%i M:%i\n", wd.upper_bound[ld.wib_idx], wd.lower_bound[ld.wib_idx], wd.min_ext_deg[ld.wib_idx]);
-                }
             }
 
             // check for failed vertices
@@ -4123,8 +4020,7 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
         else {
             // update degrees
             if (wd.remaining_count[ld.wib_idx] < wd.removed_count[ld.wib_idx]) {
-                // via remaining
-                // reset exdegs
+                // via remaining, reset exdegs
                 for (int i = (ld.idx % WARP_SIZE); i < wd.number_of_members[ld.wib_idx]; i += WARP_SIZE) {
                     ld.vertices[i].exdeg = 0;
                 }
@@ -4164,8 +4060,7 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
                 }
             }
             else {
-                // via removed
-                // update exdeg based on remaining candidates
+                // via removed, update exdeg based on remaining candidates
                 for (int i = (ld.idx % WARP_SIZE); i < wd.number_of_members[ld.wib_idx]; i += WARP_SIZE) {
                     pvertexid = ld.vertices[i].vertexid;
 
@@ -4230,28 +4125,10 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
             d_sort_i(dd.candidate_indegs + (WVERTICES_SIZE * (ld.idx / WARP_SIZE)), wd.num_val_cands[ld.wib_idx], (ld.idx % WARP_SIZE), d_sort_degs);
 
-            // DEBUG
-            if (ld.idx % WARP_SIZE == 0 && ld.vertices[0].vertexid == 136 && ld.vertices[1].vertexid == 1606 && ld.vertices[2].vertexid == 4755 && wd.number_of_members[ld.wib_idx] == 3) {
-                for (int i = 0; i < wd.num_val_cands[ld.wib_idx]; i++) {
-                    printf("%i ", dd.candidate_indegs[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + i]);
-                }
-                printf("!!!!!\n");
-            }
-
             // UNSURE - can we just set number of candidates and num val cands
             d_calculate_LU_bounds(dd, wd, ld, wd.num_val_cands[ld.wib_idx]);
             if (wd.invalid_bounds[ld.wib_idx]) {
-                // DEBUG
-                if (ld.idx % WARP_SIZE == 0 && ld.vertices[0].vertexid == 136 && ld.vertices[1].vertexid == 1606 && ld.vertices[2].vertexid == 4755 && wd.number_of_members[ld.wib_idx] == 3) {
-                    printf("U:%i L:%i M:%i !!!\n", wd.upper_bound[ld.wib_idx], wd.lower_bound[ld.wib_idx], wd.min_ext_deg[ld.wib_idx]);
-                }
                 return true;
-            }
-            // DEBUG
-            else {
-                if (ld.idx % WARP_SIZE == 0 && ld.vertices[0].vertexid == 136 && ld.vertices[1].vertexid == 1606 && ld.vertices[2].vertexid == 4755 && wd.number_of_members[ld.wib_idx] == 3) {
-                    printf("U:%i L:%i M:%i\n", wd.upper_bound[ld.wib_idx], wd.lower_bound[ld.wib_idx], wd.min_ext_deg[ld.wib_idx]);
-                }
             }
 
             // check for failed vertices
