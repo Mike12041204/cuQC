@@ -55,7 +55,7 @@ using namespace std;
 #define WARP_SIZE 32
 
 // cpu settings
-#define CPU_LEVELS 3
+#define CPU_LEVELS 1
 #define CPU_EXPAND_THRESHOLD 100
 
 // debug toggle
@@ -405,7 +405,7 @@ void h_update_degrees(CPU_Graph& hg, Vertex* vertices, int total_vertices, int n
 void h_check_for_clique(CPU_Cliques& hc, Vertex* vertices, int number_of_members);
 int h_critical_vertex_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_vertices, int& number_of_candidates, int& number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg);
 void h_write_to_tasks(CPU_Data& hd, Vertex* vertices, int total_vertices, Vertex* write_vertices, uint64_t* write_offsets, uint64_t* write_count);
-void h_fill_from_buffer(CPU_Data& hd, Vertex* write_vertices, uint64_t* write_offsets, uint64_t* write_count);
+void h_fill_from_buffer(CPU_Data& hd, Vertex* write_vertices, uint64_t* write_offsets, uint64_t* write_count, int threshold);
 
 bool h_calculate_LU_bounds_old(CPU_Data& hd, int& upper_bound, int& lower_bound, int& min_ext_deg, Vertex* vertices, int number_of_members, int number_of_candidates);
 
@@ -432,7 +432,7 @@ void print_WClique_Buffers(GPU_Data& dd);
 void print_GPU_Cliques(GPU_Data& dd);
 void print_CPU_Cliques(CPU_Cliques& hc);
 bool print_Data_Sizes(GPU_Data& dd);
-bool h_print_Data_Sizes(CPU_Data& hd, CPU_Cliques& hc);
+void h_print_Data_Sizes(CPU_Data& hd, CPU_Cliques& hc);
 void print_vertices(Vertex* vertices, int size);
 bool print_Data_Sizes_Every(GPU_Data& dd, int every);
 bool print_Warp_Data_Sizes(GPU_Data& dd);
@@ -478,23 +478,21 @@ __device__ void d_print_vertices(Vertex* vertices, int size);
 
 // TODO (GENERALLY)
 // - test program on larger graphs
-// - try different datasets besides hyves
 
 // TODO (HIGH PRIORITY)
-// - exact cpu level size control
 // - debug errors when running on larger graphs
 // - changing wtasks size causes unpredictable results
 // - critical vertex on cpu and gpu
 
 // TODO (LOW PRIORITY)
 // - fill tasks kernel does not always need to launch can check outside of kernel to determine so
+// - only need to fill gpu tasks first round if cpu expand is less than gpu expand
 // - ensure no unecessary syncs on the gpu
 // - reevaluate and change where uint64_t's are used
 // - label for vertices can be a byte rather than int
 // - cpu hybrid dfs-bfs expansion
 // - cover pruning on cpu
 // - dont need lvl2adj in all places anymore
-// - way to skip early levels for smaller graphs to decrease CPU time
 // - improve sorting algorithm
 // - sort rather than qsort?
 
@@ -595,7 +593,11 @@ void search(CPU_Graph& hg, ofstream& temp_results)
 
     // DEBUG
     if (DEBUG_TOGGLE) {
-        if (h_print_Data_Sizes(hd, hc)) { return; }
+        if ((*(hd.tasks1_offset + (*hd.tasks1_count))) > WVERTICES_SIZE) {
+            cout << "!!! VERTICES SIZE ERROR !!!" << endl;
+            return;
+        }
+        h_print_Data_Sizes(hd, hc);
     }
     //print_CPU_Data(hd);
 
@@ -1179,9 +1181,11 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc)
 
 
     // FILL TASKS FROM BUFFER
-    if (*write_count < EXPAND_THRESHOLD && (*hd.buffer_count) > 0)
-    {
-        h_fill_from_buffer(hd, write_vertices, write_offsets, write_count);
+    if ((*hd.current_level) == CPU_LEVELS && CPU_EXPAND_THRESHOLD < EXPAND_THRESHOLD && (*hd.buffer_count) > 0) {
+        h_fill_from_buffer(hd, write_vertices, write_offsets, write_count, EXPAND_THRESHOLD);
+    }
+    if (*write_count < CPU_EXPAND_THRESHOLD && (*hd.buffer_count) > 0){
+        h_fill_from_buffer(hd, write_vertices, write_offsets, write_count, CPU_EXPAND_THRESHOLD);
     }
 
     (*hd.current_level)++;
@@ -2100,7 +2104,7 @@ void h_write_to_tasks(CPU_Data& hd, Vertex* vertices, int total_vertices, Vertex
 {
     (*hd.maximal_expansion) = false;
 
-    if ((*write_count) < EXPAND_THRESHOLD) {
+    if ((*write_count) < CPU_EXPAND_THRESHOLD) {
         uint64_t start_write = write_offsets[*write_count];
 
         for (int k = 0; k < total_vertices; k++) {
@@ -2128,13 +2132,13 @@ void h_write_to_tasks(CPU_Data& hd, Vertex* vertices, int total_vertices, Vertex
     }
 }
 
-void h_fill_from_buffer(CPU_Data& hd, Vertex* write_vertices, uint64_t* write_offsets, uint64_t* write_count)
+void h_fill_from_buffer(CPU_Data& hd, Vertex* write_vertices, uint64_t* write_offsets, uint64_t* write_count, int threshold)
 {
     // read from end of buffer, write to end of tasks, decrement buffer
     (*hd.maximal_expansion) = false;
 
     // get read and write locations
-    int write_amount = ((*hd.buffer_count) >= (EXPAND_THRESHOLD - *write_count)) ? EXPAND_THRESHOLD - *write_count : (*hd.buffer_count);
+    int write_amount = ((*hd.buffer_count) >= (threshold - *write_count)) ? threshold - *write_count : (*hd.buffer_count);
     uint64_t start_buffer = hd.buffer_offset[(*hd.buffer_count) - write_amount];
     uint64_t end_buffer = hd.buffer_offset[(*hd.buffer_count)];
     uint64_t size_buffer = end_buffer - start_buffer;
@@ -3000,18 +3004,11 @@ bool print_Data_Sizes(GPU_Data& dd)
     return false;
 }
 
-bool h_print_Data_Sizes(CPU_Data& hd, CPU_Cliques& hc)
+void h_print_Data_Sizes(CPU_Data& hd, CPU_Cliques& hc)
 {
     cout << "L: " << (*hd.current_level) << " T1: " << (*hd.tasks1_count) << " " << (*(hd.tasks1_offset + (*hd.tasks1_count))) << " T2: " << (*hd.tasks2_count) << " " << 
         (*(hd.tasks2_offset + (*hd.tasks2_count))) << " B: " << (*hd.buffer_count) << " " << (*(hd.buffer_offset + (*hd.buffer_count))) << " C: " << 
         (*hc.cliques_count) << " " << (*(hc.cliques_offset + (*hc.cliques_count))) << endl;
-
-    if ((*(hd.tasks1_offset + (*hd.tasks1_count))) > WVERTICES_SIZE) {
-        cout << "!!! VERTICES SIZE ERROR !!!" << endl;
-        return true;
-    }
-
-    return false;
 }
 
 void print_WTask_Buffers(GPU_Data& dd)
