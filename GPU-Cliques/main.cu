@@ -55,8 +55,8 @@ using namespace std;
 #define WARP_SIZE 32
 
 // cpu settings
-#define CPU_LEVELS 0
-#define CPU_EXPAND_THRESHOLD 1
+#define CPU_LEVELS 2
+#define CPU_EXPAND_THRESHOLD 100
 
 // debug toggle
 #define DEBUG_TOGGLE 1
@@ -486,14 +486,7 @@ __device__ void d_print_vertices(Vertex* vertices, int size);
 
 
 
-
-// why does hyves result in 1481 vs 1480, trace a find cause of extra clique
-
-// TODO (GENERALLY)
-// - test program on larger graphs
-
 // TODO (HIGH PRIORITY)
-// - debug errors when running on larger graphs
 // - changing wtasks size causes unpredictable results
 // - critical vertex on cpu and gpu
 
@@ -1153,12 +1146,6 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc)
             // ADD ONE VERTEX
             method_return = h_add_one_vertex(hg, hd, vertices, total_vertices, number_of_candidates, number_of_members, upper_bound, lower_bound, min_ext_deg);
 
-            // continue if not enough vertices after pruning
-            if (method_return == 2) {
-                delete vertices;
-                continue;
-            }
-
             // if vertex in x found as not extendable, check if current set is clique and continue to next iteration
             if (method_return == 1) {
                 if (number_of_members >= minimum_clique_size) {
@@ -1172,7 +1159,14 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc)
 
 
             // CRITICAL VERTEX PRUNING
-            //method_return = h_critical_vertex_pruning(hg, hd, vertices, total_vertices, number_of_candidates, number_of_members, upper_bound, lower_bound, min_ext_deg);
+            method_return = h_critical_vertex_pruning(hg, hd, vertices, total_vertices, number_of_candidates, number_of_members, upper_bound, lower_bound, min_ext_deg);
+
+            // if critical fail continue onto next iteration
+            if (method_return == 2) {
+                cout << "!!!CF!!!" << endl;
+                delete vertices;
+                continue;
+            }
 
 
 
@@ -1672,20 +1666,10 @@ int h_critical_vertex_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int
     total_vertices -= number_of_removed;
     number_of_candidates -= number_of_removed;
 
-    // continue if not enough vertices after pruning
-    if (total_vertices < minimum_clique_size) {
-        return 2;
-    }
-
 
 
     // DEGREE-BASED PRUNING
     method_return = h_degree_pruning(hg, hd, vertices, total_vertices, number_of_candidates, number_of_members, upper_bound, lower_bound, min_ext_deg);
-
-    // continue if not enough vertices after pruning
-    if (total_vertices < minimum_clique_size) {
-        return 2;
-    }
 
     // if vertex in x found as not extendable, check if current set is clique and continue to next iteration
     if (method_return) {
