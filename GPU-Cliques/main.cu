@@ -3299,8 +3299,28 @@ __global__ void d_expand_level(GPU_Data dd)
             }
             __syncwarp();
 
+
+
             // ADD ONE VERTEX
             method_return = d_add_one_vertex(dd, wd, ld);
+
+            // if failed found check for clique and continue on to the next iteration
+            //if (method_return == 1) {
+            //    if (wd.number_of_members[ld.wib_idx] >= (*dd.minimum_clique_size)) {
+            //        d_check_for_clique(dd, wd, ld);
+            //    }
+            //    continue;
+            //}
+
+
+
+            // CRITICAL VERTEX PRUNING
+            //method_return = critical_vertex_pruning(dd, wd, ld);
+
+            // critical fail, cannot be clique continue onto next iteration
+            //if (method_return == 2) {
+            //    continue;
+            //}
 
 
 
