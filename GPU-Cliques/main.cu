@@ -55,11 +55,11 @@ using namespace std;
 #define WARP_SIZE 32
 
 // cpu settings
-#define CPU_LEVELS 1
-#define CPU_EXPAND_THRESHOLD 100
+#define CPU_LEVELS 0
+#define CPU_EXPAND_THRESHOLD 1
 
 // debug toggle
-#define DEBUG_TOGGLE 1
+#define DEBUG_TOGGLE 0
 
 // VERTEX DATA
 struct Vertex
@@ -90,6 +90,9 @@ class CPU_Graph
 
     CPU_Graph(ifstream& graph_stream)
     {
+        // TIME
+        auto start1 = std::chrono::high_resolution_clock::now();
+
         graph_stream.seekg(0, graph_stream.end);
         string graph_text(graph_stream.tellg(), 0);
         graph_stream.seekg(0);
@@ -102,13 +105,16 @@ class CPU_Graph
         onehop_offsets[0] = 0;
         number_of_lvl2adj = 0;
 
-        // DEBUG
-        //cout << "|V| = " << number_of_vertices << " |E| = " << number_of_edges << " #bytes: " << text.size() << endl;
-
         int vertex_count = 0;
         int number_count = 0;
         int current_number = 0;
         bool empty = true;
+
+        // TIME
+        auto stop1 = std::chrono::high_resolution_clock::now();
+        auto duration1 = std::chrono::duration_cast<std::chrono::milliseconds>(stop1 - start1);
+        cout << "read from file: " << duration1.count() << " ms" << endl;
+        start1 = std::chrono::high_resolution_clock::now();
 
         // TODO - way to detect and handle these cases without changing code?
         // TWO FORMATS SO FAR
@@ -151,9 +157,15 @@ class CPU_Graph
         }
         onehop_offsets[++vertex_count] = number_count;
 
-        // set variables an initialize twohop arrays
+        // set variables and initialize twohop arrays
         number_of_vertices = vertex_count;
         number_of_edges = number_count / 2;
+
+        // TIME
+        stop1 = std::chrono::high_resolution_clock::now();
+        duration1 = std::chrono::duration_cast<std::chrono::milliseconds>(stop1 - start1);
+        cout << "onehop adj: " << duration1.count() << " ms" << endl;
+        start1 = std::chrono::high_resolution_clock::now();
 
         twohop_offsets = new uint64_t[number_of_vertices + 1];
 
@@ -182,14 +194,24 @@ class CPU_Graph
             }
 
             twohop_offsets[i + 1] = number_of_lvl2adj;
-            memset(twohop_flag_DIA, true, number_of_vertices * sizeof(bool));
+
+            for (int j = twohop_offsets[i]; j < twohop_offsets[i + 1]; j++) {
+                twohop_flag_DIA[twohop_neighbors[j]] = true;
+            }
+
+            // sort adjacencies
+            if (onehop_offsets[i + 1] != onehop_offsets[i]) {
+                qsort(onehop_neighbors + onehop_offsets[i], onehop_offsets[i + 1] - onehop_offsets[i], sizeof(int), h_sort_asce);
+            }
+            if (twohop_offsets[i + 1] != twohop_offsets[i]) {
+                qsort(twohop_neighbors + twohop_offsets[i], twohop_offsets[i + 1] - twohop_offsets[i], sizeof(int), h_sort_asce);
+            }
         }
 
-        // sort adjacencies
-        for (int i = 0; i < vertex_count; i++) {
-            qsort(onehop_neighbors + onehop_offsets[i], onehop_offsets[i + 1] - onehop_offsets[i], sizeof(int), h_sort_asce);
-            qsort(twohop_neighbors + twohop_offsets[i], twohop_offsets[i + 1] - twohop_offsets[i], sizeof(int), h_sort_asce);
-        }
+        // TIME
+        stop1 = std::chrono::high_resolution_clock::now();
+        duration1 = std::chrono::duration_cast<std::chrono::milliseconds>(stop1 - start1);
+        cout << "twohop adj: " << duration1.count() << " ms" << endl;
 
         // DEBUG
         if (DEBUG_TOGGLE) {
@@ -312,6 +334,8 @@ struct GPU_Data
     // DEBUG
     bool* debug;
     int* idebug;
+    int* cdebug;
+    int* cdebug_c;
 
     // GPU GRAPH
     int* number_of_vertices;
@@ -476,6 +500,9 @@ __device__ void d_print_vertices(Vertex* vertices, int size);
 
 
 
+
+// why does hyves result in 1481 vs 1480, trace a find cause of extra clique
+
 // TODO (GENERALLY)
 // - test program on larger graphs
 
@@ -498,7 +525,11 @@ __device__ void d_print_vertices(Vertex* vertices, int size);
 
 
 
-// INPUT SETTINGS
+// DEBUG VARIBALES
+uint64_t max_tasks_s, max_buffer_s, max_buffer_o, max_cliques_s, max_cliques_o, num_vert, num_lvl1, num_lvl2, max_wtasks_s,
+         max_wtasks_o, max_wcliques_s, max_wcliques_o, max_vert;
+
+// COMMAND LINE INPUT VARIABLES
 double minimum_degree_ratio;
 int minimum_clique_size;
 int* minimum_degrees;
@@ -508,6 +539,9 @@ int* minimum_degrees;
 // MAIN
 int main(int argc, char* argv[])
 {
+    // TIME
+    auto start = std::chrono::high_resolution_clock::now();
+
     // ENSURE PROPER USAGE
     if (argc != 5) {
         printf("Usage: ./main <graph_file> <gamma> <min_size> <output_file.txt>\n");
@@ -530,7 +564,7 @@ int main(int argc, char* argv[])
     }
 
     // TIME
-    auto start = std::chrono::high_resolution_clock::now();
+    auto start1 = std::chrono::high_resolution_clock::now();
 
     // GRAPH / MINDEGS
     cout << ">:PRE-PROCESSING" << endl;
@@ -538,6 +572,11 @@ int main(int argc, char* argv[])
     graph_stream.close();
     calculate_minimum_degrees(hg);
     ofstream temp_results("temp.txt");
+
+    // TIME
+    auto stop1 = std::chrono::high_resolution_clock::now();
+    auto duration1 = std::chrono::duration_cast<std::chrono::milliseconds>(stop1 - start1);
+    cout << "LOAD GRAPH: " << duration1.count() << " ms" << endl;
 
     // DEBUG
     if (DEBUG_TOGGLE && memory_error) {
@@ -836,6 +875,15 @@ void allocate_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc, CPU_Graph& hg)
 
     chkerr(cudaMemset(dd.debug, false, sizeof(bool)));
     chkerr(cudaMemset(dd.idebug, 0, sizeof(int)));
+
+    chkerr(cudaMalloc((void**)&dd.cdebug, sizeof(int) * 24));
+    chkerr(cudaMalloc((void**)&dd.cdebug_c, sizeof(int)));
+
+    int cdebug_c = 24;
+    int cdebug[] = {23, 140, 225, 233, 241, 255, 292, 299, 313, 314, 355, 383, 416, 526, 586, 592, 593, 794, 1185, 1308, 1310, 1330, 2568, 2572};
+
+    chkerr(cudaMemcpy(dd.cdebug_c, &cdebug_c, sizeof(int), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(dd.cdebug, cdebug, sizeof(int) * 24, cudaMemcpyHostToDevice));
 }
 
 // processes 0th level of expansion
@@ -3642,6 +3690,20 @@ __device__ int d_add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     // ADD ONE VERTEX
     pvertexid = ld.vertices[wd.number_of_members[ld.wib_idx]].vertexid;
 
+
+
+    // DEBUG
+    bool debug = false;
+    __syncwarp();
+    if ((ld.idx % WARP_SIZE == 0) && wd.number_of_members[ld.wib_idx] == 2 && ld.vertices[wd.number_of_members[ld.wib_idx]].vertexid == 1204 && ld.vertices[wd.number_of_members[ld.wib_idx] - 1].vertexid == 478 && 
+        ld.vertices[wd.number_of_members[ld.wib_idx] - 2].vertexid == 553) {
+        //d_print_vertices(ld.vertices, wd.total_vertices[ld.wib_idx]);
+        debug = true;
+    }
+    __syncwarp();
+
+
+
     if ((ld.idx % WARP_SIZE) == 0) {
         ld.vertices[wd.number_of_members[ld.wib_idx]].label = 1;
         wd.number_of_members[ld.wib_idx]++;
@@ -3669,6 +3731,17 @@ __device__ int d_add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
     // DEGREE BASED PRUNING
     failed_found = d_degree_pruning(dd, wd, ld);
+
+
+
+    // DEBUG
+    __syncwarp();
+    if (debug) {
+        //d_print_vertices(ld.vertices, wd.total_vertices[ld.wib_idx]);
+    }
+    __syncwarp();
+
+
 
     // if vertex in x found as not extendable continue to next iteration
     if (failed_found) {
@@ -3835,7 +3908,6 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
     
     while (wd.remaining_count[ld.wib_idx] > 0 && wd.removed_count[ld.wib_idx] > 0) {
-
         // different blocks for the read and write locations, vertices and remaining, this is done to avoid using extra variables and only one condition
         if (wd.rw_counter[ld.wib_idx] % 2 == 0) {
             // update degrees
@@ -3907,8 +3979,6 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
                 }
             }
             __syncwarp();
-
-
 
             lane_remaining_count = 0;
 
@@ -4008,7 +4078,7 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
                 ld.vertices[wd.number_of_members[ld.wib_idx] + lane_remaining_count + i] = dd.remaining_candidates[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + dd.lane_remaining_candidates[lane_write + i]];
             }
             // only need removed if going to be using removed to update degrees
-            if (wd.num_val_cands[ld.wib_idx] > wd.removed_count[ld.wib_idx]) {
+            if (!(wd.num_val_cands[ld.wib_idx] < wd.removed_count[ld.wib_idx])) {
                 for (int i = 0; i < pvertexid; i++) {
                     dd.removed_candidates[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + lane_removed_count + i] = dd.remaining_candidates[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + dd.lane_removed_candidates[lane_write + i]].vertexid;
                 }
@@ -4084,8 +4154,6 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
                 }
             }
             __syncwarp();
-
-
 
             lane_remaining_count = 0;
 
@@ -4185,7 +4253,7 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
                 dd.remaining_candidates[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + lane_remaining_count + i] = ld.vertices[wd.number_of_members[ld.wib_idx] + dd.lane_remaining_candidates[lane_write + i]];
             }
             // only need removed if going to be using removed to update degrees
-            if (wd.num_val_cands[ld.wib_idx] > wd.removed_count[ld.wib_idx]) {
+            if (!(wd.num_val_cands[ld.wib_idx] < wd.removed_count[ld.wib_idx])) {
                 for (int i = 0; i < pvertexid; i++) {
                     dd.removed_candidates[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + lane_removed_count + i] = ld.vertices[wd.number_of_members[ld.wib_idx] + dd.lane_removed_candidates[lane_write + i]].vertexid;
                 }
