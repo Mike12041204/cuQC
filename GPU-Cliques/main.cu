@@ -59,7 +59,7 @@ using namespace std;
 #define CPU_EXPAND_THRESHOLD 1
 
 // debug toggle
-#define DEBUG_TOGGLE 0
+#define DEBUG_TOGGLE 1
 
 // VERTEX DATA
 struct Vertex
@@ -90,9 +90,6 @@ class CPU_Graph
 
     CPU_Graph(ifstream& graph_stream)
     {
-        // TIME
-        auto start1 = std::chrono::high_resolution_clock::now();
-
         graph_stream.seekg(0, graph_stream.end);
         string graph_text(graph_stream.tellg(), 0);
         graph_stream.seekg(0);
@@ -110,11 +107,7 @@ class CPU_Graph
         int current_number = 0;
         bool empty = true;
 
-        // TIME
-        auto stop1 = std::chrono::high_resolution_clock::now();
-        auto duration1 = std::chrono::duration_cast<std::chrono::milliseconds>(stop1 - start1);
-        cout << "read from file: " << duration1.count() << " ms" << endl;
-        start1 = std::chrono::high_resolution_clock::now();
+
 
         // TODO - way to detect and handle these cases without changing code?
         // TWO FORMATS SO FAR
@@ -160,12 +153,8 @@ class CPU_Graph
         // set variables and initialize twohop arrays
         number_of_vertices = vertex_count;
         number_of_edges = number_count / 2;
+        
 
-        // TIME
-        stop1 = std::chrono::high_resolution_clock::now();
-        duration1 = std::chrono::duration_cast<std::chrono::milliseconds>(stop1 - start1);
-        cout << "onehop adj: " << duration1.count() << " ms" << endl;
-        start1 = std::chrono::high_resolution_clock::now();
 
         twohop_offsets = new uint64_t[number_of_vertices + 1];
 
@@ -208,10 +197,7 @@ class CPU_Graph
             }
         }
 
-        // TIME
-        stop1 = std::chrono::high_resolution_clock::now();
-        duration1 = std::chrono::duration_cast<std::chrono::milliseconds>(stop1 - start1);
-        cout << "twohop adj: " << duration1.count() << " ms" << endl;
+
 
         // DEBUG
         if (DEBUG_TOGGLE) {
@@ -563,20 +549,12 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    // TIME
-    auto start1 = std::chrono::high_resolution_clock::now();
-
     // GRAPH / MINDEGS
     cout << ">:PRE-PROCESSING" << endl;
     CPU_Graph hg(graph_stream);
     graph_stream.close();
     calculate_minimum_degrees(hg);
     ofstream temp_results("temp.txt");
-
-    // TIME
-    auto stop1 = std::chrono::high_resolution_clock::now();
-    auto duration1 = std::chrono::duration_cast<std::chrono::milliseconds>(stop1 - start1);
-    cout << "LOAD GRAPH: " << duration1.count() << " ms" << endl;
 
     // DEBUG
     if (DEBUG_TOGGLE && memory_error) {
@@ -1135,7 +1113,7 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc)
 
 
         // NEXT LEVEL
-        // TODO - should be num_covered + num_mem, works since only covered when 
+        // TODO - should be num_covered + num_mem, works since only covered when no mem, first round
         for (int j = number_of_covered; j < expansions; j++) {
 
 
