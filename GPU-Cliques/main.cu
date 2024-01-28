@@ -56,7 +56,7 @@ using namespace std;
 
 // cpu settings
 #define CPU_LEVELS 100
-#define CPU_EXPAND_THRESHOLD 100
+#define CPU_EXPAND_THRESHOLD 704
 
 // debug toggle
 #define DEBUG_TOGGLE 1
@@ -325,8 +325,6 @@ struct GPU_Data
     // DEBUG
     bool* debug;
     int* idebug;
-    int* cdebug;
-    int* cdebug_c;
 
     // GPU GRAPH
     int* number_of_vertices;
@@ -427,6 +425,7 @@ bool h_calculate_LU_bounds_old(CPU_Data& hd, int& upper_bound, int& lower_bound,
 int h_bsearch_array(int* search_array, int array_size, int search_number);
 int h_lsearch_vert(Vertex* search_array, int array_size, int search_vertexid);
 int h_sort_vert(const void* a, const void* b);
+int h_sort_vert_cv(const void* a, const void* b);
 int h_sort_vert_Q(const void* a, const void* b);
 int h_sort_vert_LU(const void* a, const void* b);
 int h_sort_desc(const void* a, const void* b);
@@ -492,21 +491,18 @@ __device__ void d_print_vertices(Vertex* vertices, int size);
 
 
 // TODO (HIGH PRIORITY)
-// - critical vertex on cpu and gpu
-// - changing wtasks size causes unpredictable results
-// - dumping cliques causes seg fault, unimportant as this never happens unless cliques is tiny
+// - critical vertex on gpu
 
 // TODO (LOW PRIORITY)
+// - doesnt run when cpu et is greater than gpu et
 // - fill tasks kernel does not always need to launch can check outside of kernel to determine so
 // - only need to fill gpu tasks first round if cpu expand is less than gpu expand
 // - ensure no unecessary syncs on the gpu
 // - reevaluate and change where uint64_t's are used
 // - label for vertices can be a byte rather than int
-// - cpu hybrid dfs-bfs expansion
-// - cover pruning on cpu
 // - dont need lvl2adj in all places anymore
-// - improve sorting algorithm
-// - sort rather than qsort?
+// - changing wtasks size causes unpredictable results
+// - dumping cliques causes seg fault, unimportant as this never happens unless cliques is tiny
 
 
 
@@ -836,11 +832,11 @@ void allocate_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc, CPU_Graph& hg)
     chkerr(cudaMemset(dd.cliques_count, 0, sizeof(uint64_t)));
 
     chkerr(cudaMalloc((void**)&dd.wcliques_count, sizeof(uint64_t) * number_of_warps));
-    chkerr(cudaMalloc((void**)&dd.wcliques_offset, (sizeof(uint64_t)* WCLIQUES_OFFSET_SIZE)* number_of_warps));
+    chkerr(cudaMalloc((void**)&dd.wcliques_offset, (sizeof(uint64_t) * WCLIQUES_OFFSET_SIZE) * number_of_warps));
     chkerr(cudaMalloc((void**)&dd.wcliques_vertex, (sizeof(int) * WCLIQUES_SIZE) * number_of_warps));
 
-    chkerr(cudaMemset(dd.wcliques_offset, 0, (sizeof(uint64_t)* WCLIQUES_OFFSET_SIZE)* number_of_warps));
-    chkerr(cudaMemset(dd.wcliques_count, 0, sizeof(uint64_t)* number_of_warps));
+    chkerr(cudaMemset(dd.wcliques_offset, 0, (sizeof(uint64_t) * WCLIQUES_OFFSET_SIZE) * number_of_warps));
+    chkerr(cudaMemset(dd.wcliques_count, 0, sizeof(uint64_t) * number_of_warps));
 
     chkerr(cudaMalloc((void**)&dd.total_cliques, sizeof(int)));
 
@@ -857,15 +853,6 @@ void allocate_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc, CPU_Graph& hg)
 
     chkerr(cudaMemset(dd.debug, false, sizeof(bool)));
     chkerr(cudaMemset(dd.idebug, 0, sizeof(int)));
-
-    chkerr(cudaMalloc((void**)&dd.cdebug, sizeof(int) * 24));
-    chkerr(cudaMalloc((void**)&dd.cdebug_c, sizeof(int)));
-
-    int cdebug_c = 24;
-    int cdebug[] = {23, 140, 225, 233, 241, 255, 292, 299, 313, 314, 355, 383, 416, 526, 586, 592, 593, 794, 1185, 1308, 1310, 1330, 2568, 2572};
-
-    chkerr(cudaMemcpy(dd.cdebug_c, &cdebug_c, sizeof(int), cudaMemcpyHostToDevice));
-    chkerr(cudaMemcpy(dd.cdebug, cdebug, sizeof(int) * 24, cudaMemcpyHostToDevice));
 }
 
 // processes 0th level of expansion
@@ -1567,8 +1554,15 @@ int h_critical_vertex_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int
 
     bool method_return;
 
+
+
+    // initialize vertex order map
+    for (int i = 0; i < total_vertices; i++) {
+        hd.vertex_order_map[vertices[i].vertexid] = i;
+    }
+
     // CRITICAL VERTEX PRUNING
-    set<int> critical_vertex_neighbors;
+    int number_of_crit_adj;
     // adj_counter[0] = 10, means that the vertex at position 0 in new_vertices has 10 critical vertices neighbors within 2 hops
     int* adj_counters = new int[total_vertices];
     memset(adj_counters, 0, sizeof(int) * total_vertices);
@@ -1578,53 +1572,73 @@ int h_critical_vertex_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int
     {
         // if they are a critical vertex
         if (vertices[k].indeg + vertices[k].exdeg == minimum_degrees[number_of_members + lower_bound] && vertices[k].exdeg > 0) {
-            // iterate through all neighbors
             pvertexid = vertices[k].vertexid;
+
+            // iterate through all neighbors
             pneighbors_start = hg.onehop_offsets[pvertexid];
             pneighbors_end = hg.onehop_offsets[pvertexid + 1];
             for (uint64_t l = pneighbors_start; l < pneighbors_end; l++) {
-                int neighbor_id = hg.onehop_neighbors[l];
-                int position_of_neighbor = h_lsearch_vert(vertices, total_vertices, neighbor_id);
+                phelper1 = hd.vertex_order_map[hg.onehop_neighbors[l]];
 
                 // if neighbor is cand
-                if (position_of_neighbor != -1) {
-                    if (vertices[position_of_neighbor].label == 0) {
-                        critical_vertex_neighbors.insert(neighbor_id);
-                        vertices[position_of_neighbor].label = 4;
-                    }
+                if (phelper1 >= number_of_members) {
+                    vertices[phelper1].label = 4;
                 }
             }
         }
     }
 
+    // reset vertex order map
+    for (int i = 0; i < total_vertices; i++) {
+        hd.vertex_order_map[vertices[i].vertexid] = -1;
+    }
+
+    // sort vertices so that critical vertex adjacent candidates are immediately after vertices within the clique
+    qsort(vertices + number_of_members, number_of_candidates, sizeof(Vertex), h_sort_vert_cv);
+
+    // calculate number of critical adjacent vertices
+    number_of_crit_adj = 0;
+    for (int i = number_of_members; i < total_vertices; i++) {
+        if (vertices[i].label == 4) {
+            number_of_crit_adj++;
+        }
+        else {
+            break;
+        }
+    }
+
     // if there were any neighbors of critical vertices
-    if (critical_vertex_neighbors.size() > 0)
+    if (number_of_crit_adj > 0)
     {
-        // sort vertices so that critical vertex adjacent candidates are immediately after vertices within the clique
-        qsort(vertices, total_vertices, sizeof(Vertex), h_sort_vert);
+        // initialize vertex order map
+        for (int i = 0; i < total_vertices; i++) {
+            hd.vertex_order_map[vertices[i].vertexid] = i;
+        }
 
         // iterate through all neighbors
-        for (int neighbor : critical_vertex_neighbors) {
+        for (int i = number_of_members; i < number_of_members + number_of_crit_adj; i++) {
+            pvertexid = vertices[i].vertexid;
+
             // update 1hop adj
-            pneighbors_start = hg.onehop_offsets[neighbor];
-            pneighbors_end = hg.onehop_offsets[neighbor + 1];
+            pneighbors_start = hg.onehop_offsets[pvertexid];
+            pneighbors_end = hg.onehop_offsets[pvertexid + 1];
             for (uint64_t k = pneighbors_start; k < pneighbors_end; k++) {
-                int neighbor_of_added_vertex = hg.onehop_neighbors[k];
-                int position_of_neighbor = h_lsearch_vert(vertices, total_vertices, neighbor_of_added_vertex);
-                if (position_of_neighbor != -1) {
-                    vertices[position_of_neighbor].indeg++;
-                    vertices[position_of_neighbor].exdeg--;
+                phelper1 = hd.vertex_order_map[hg.onehop_neighbors[k]];
+
+                if (phelper1 > -1) {
+                    vertices[phelper1].indeg++;
+                    vertices[phelper1].exdeg--;
                 }
             }
 
             // track 2hop adj
-            pneighbors_start = hg.twohop_offsets[neighbor];
-            pneighbors_end = hg.twohop_offsets[neighbor + 1];
+            pneighbors_start = hg.twohop_offsets[pvertexid];
+            pneighbors_end = hg.twohop_offsets[pvertexid + 1];
             for (uint64_t k = pneighbors_start; k < pneighbors_end; k++) {
-                int neighbor_of_added_vertex = hg.twohop_neighbors[k];
-                int position_of_neighbor = h_lsearch_vert(vertices, total_vertices, neighbor_of_added_vertex);
-                if (position_of_neighbor != -1) {
-                    adj_counters[position_of_neighbor]++;
+                phelper1 = hd.vertex_order_map[hg.twohop_neighbors[k]];
+
+                if (phelper1 > -1) {
+                    adj_counters[phelper1]++;
                 }
             }
         }
@@ -1633,72 +1647,70 @@ int h_critical_vertex_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int
 
         // all vertices within the clique must be within 2hops of the newly added critical vertex adj vertices
         for (int k = 0; k < number_of_members; k++) {
-            if (adj_counters[k] != critical_vertex_neighbors.size()) {
+            if (adj_counters[k] != number_of_crit_adj) {
                 critical_fail = true;
             }
         }
 
         if (critical_fail) {
+            // reset vertex order map
+            for (int i = 0; i < total_vertices; i++) {
+                hd.vertex_order_map[vertices[i].vertexid] = -1;
+            }
             delete adj_counters;
             return 2;
         }
 
         // all critical adj vertices must all be within 2 hops of each other
-        for (int k = number_of_members; k < number_of_members + critical_vertex_neighbors.size(); k++) {
-            if (adj_counters[k] < critical_vertex_neighbors.size() - 1) {
+        for (int k = number_of_members; k < number_of_members + number_of_crit_adj; k++) {
+            if (adj_counters[k] < number_of_crit_adj - 1) {
                 critical_fail = true;
             }
         }
 
         if (critical_fail) {
+            // reset vertex order map
+            for (int i = 0; i < total_vertices; i++) {
+                hd.vertex_order_map[vertices[i].vertexid] = -1;
+            }
             delete adj_counters;
             return 2;
         }
 
         // no failed vertices found so add all critical vertex adj candidates to clique
-        for (int k = number_of_members; k < number_of_members + critical_vertex_neighbors.size(); k++) {
+        for (int k = number_of_members; k < number_of_members + number_of_crit_adj; k++) {
             vertices[k].label = 1;
         }
-        number_of_members += critical_vertex_neighbors.size();
-        number_of_candidates -= critical_vertex_neighbors.size();
-        qsort(vertices, total_vertices, sizeof(Vertex), h_sort_vert);
+        number_of_members += number_of_crit_adj;
+        number_of_candidates -= number_of_crit_adj;
     }
 
 
 
     // DIAMTER PRUNING
-    number_of_removed_candidates = 0;
+    (*hd.remaining_count) = 0;
+
     // remove all cands who are not within 2hops of all newly added cands
     for (int k = number_of_members; k < total_vertices; k++) {
-        if (adj_counters[k] != critical_vertex_neighbors.size()) {
+        if (adj_counters[k] == number_of_crit_adj) {
+            hd.candidate_indegs[(*hd.remaining_count)++] = vertices[k].indeg;
+        }
+        else {
             vertices[k].label = -1;
-            number_of_removed_candidates++;
         }
     }
-    qsort(vertices, total_vertices, sizeof(Vertex), sort_vertices);
 
-    delete adj_counters;
-
-    // update exdeg of vertices connected to removed cands
-    h_update_degrees(hg, vertices, total_vertices, number_of_removed_candidates);
-
-    total_vertices -= number_of_removed_candidates;
-    number_of_candidates -= number_of_removed_candidates;
-
-    // continue if not enough vertices after pruning
-    if (total_vertices < minimum_clique_size) {
-        return 2;
-    }
-
-
+    
 
     // DEGREE-BASED PRUNING
     method_return = h_degree_pruning(hg, hd, vertices, total_vertices, number_of_candidates, number_of_members, upper_bound, lower_bound, min_ext_deg);
 
-    // continue if not enough vertices after pruning
-    if (total_vertices < minimum_clique_size) {
-        return 2;
+    // reset vertex order map
+    for (int i = 0; i < total_vertices; i++) {
+        hd.vertex_order_map[vertices[i].vertexid] = -1;
     }
+
+    delete adj_counters;
 
     // if vertex in x found as not extendable, check if current set is clique and continue to next iteration
     if (method_return) {
@@ -2353,6 +2365,24 @@ int h_sort_vert_Q(const void* a, const void* b)
     else if (v1->vertexid > v2->vertexid)
         return -1;
     else if (v1->vertexid < v2->vertexid)
+        return 1;
+    else
+        return 0;
+}
+
+int h_sort_vert_cv(const void* a, const void* b)
+{
+    // but crit adj vertices before candidates
+
+    Vertex* v1;
+    Vertex* v2;
+
+    v1 = (Vertex*)a;
+    v2 = (Vertex*)b;
+
+    if (v1->label == 4 && v2->label != 4)
+        return -1;
+    else if (v1->label != 4 && v2->label == 4)
         return 1;
     else
         return 0;
