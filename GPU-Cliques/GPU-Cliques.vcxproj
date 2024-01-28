@@ -22,6 +22,7 @@
     <Text Include="lastfm.txt" />
     <Text Include="amazon.txt" />
     <Text Include="hyves.txt" />
+    <Text Include="edgeToAdj.py.txt" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="DS_Diagram.jpg" />
