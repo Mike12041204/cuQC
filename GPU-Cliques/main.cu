@@ -1667,22 +1667,38 @@ int h_critical_vertex_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int
 
 
     // DIAMTER PRUNING
-    (*hd.remaining_count) = 0;
-
+    number_of_removed_candidates = 0;
     // remove all cands who are not within 2hops of all newly added cands
-    for (int k = number_of_members; k < total_vertices; k++) {
+    for (int k = number_of_new_vertices; k < total_new_vertices; k++) {
         if (adj_counters[k] != critical_vertex_neighbors.size()) {
-            vertices[k].label = -1;
-        }
-        else if (vertices[k].exdeg + vertices[k].indeg >= h_get_mindeg(number_of_members + 1)){
-            hd.candidate_indegs[(*hd.remaining_count)++] = vertices[k].indeg;
+            new_vertices[k].label = -1;
+            number_of_removed_candidates++;
         }
     }
-
-    // DEGREE-BASED PRUNING
-    method_return = h_degree_pruning(hg, hd, vertices, total_vertices, number_of_candidates, number_of_members, upper_bound, lower_bound, min_ext_deg);
+    qsort(new_vertices, total_new_vertices, sizeof(Vertex), sort_vertices);
 
     delete adj_counters;
+
+    // update exdeg of vertices connected to removed cands
+    h_update_degrees(graph, new_vertices, total_new_vertices, number_of_removed_candidates);
+
+    total_new_vertices -= number_of_removed_candidates;
+    number_of_new_candidates -= number_of_removed_candidates;
+
+    // continue if not enough vertices after pruning
+    if (total_new_vertices < minimum_clique_size) {
+        return 2;
+    }
+
+
+
+    // DEGREE-BASED PRUNING
+    method_return = h_degree_pruning(graph, new_vertices, total_new_vertices, number_of_new_candidates, number_of_new_vertices, upper_bound, lower_bound, minimum_external_degree);
+
+    // continue if not enough vertices after pruning
+    if (total_new_vertices < minimum_clique_size) {
+        return 2;
+    }
 
     // if vertex in x found as not extendable, check if current set is clique and continue to next iteration
     if (method_return) {
