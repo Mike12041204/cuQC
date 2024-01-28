@@ -1170,7 +1170,7 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc)
 
 
             // CRITICAL VERTEX PRUNING
-            //method_return = h_critical_vertex_pruning(hg, hd, vertices, total_vertices, number_of_candidates, number_of_members, upper_bound, lower_bound, min_ext_deg);
+            method_return = h_critical_vertex_pruning(hg, hd, vertices, total_vertices, number_of_candidates, number_of_members, upper_bound, lower_bound, min_ext_deg);
 
             // if critical fail continue onto next iteration
             if (method_return == 2) {
