@@ -1170,7 +1170,7 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc)
 
 
             // CRITICAL VERTEX PRUNING
-            method_return = h_critical_vertex_pruning(hg, hd, vertices, total_vertices, number_of_candidates, number_of_members, upper_bound, lower_bound, min_ext_deg);
+            //method_return = h_critical_vertex_pruning(hg, hd, vertices, total_vertices, number_of_candidates, number_of_members, upper_bound, lower_bound, min_ext_deg);
 
             // if critical fail continue onto next iteration
             if (method_return == 2) {
@@ -2324,8 +2324,6 @@ int h_sort_vert_Q(const void* a, const void* b)
         return -1;
     else if (v1->label != 3 && v2->label == 3)
         return 1;
-    else if (v1->label == 0 && v2->label != 0)
-        return -1;
     else if (v1->indeg > v2->indeg)
         return -1;
     else if (v1->indeg < v2->indeg)
