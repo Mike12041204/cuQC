@@ -1563,7 +1563,7 @@ int h_critical_vertex_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int
     int phelper2;
 
     bool critical_fail = false;
-    int number_of_removed;
+    int number_of_removed_candidates;
 
     bool method_return;
 
@@ -1578,7 +1578,6 @@ int h_critical_vertex_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int
     {
         // if they are a critical vertex
         if (vertices[k].indeg + vertices[k].exdeg == minimum_degrees[number_of_members + lower_bound] && vertices[k].exdeg > 0) {
-
             // iterate through all neighbors
             pvertexid = vertices[k].vertexid;
             pneighbors_start = hg.onehop_offsets[pvertexid];
@@ -1639,6 +1638,11 @@ int h_critical_vertex_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int
             }
         }
 
+        if (critical_fail) {
+            delete adj_counters;
+            return 2;
+        }
+
         // all critical adj vertices must all be within 2 hops of each other
         for (int k = number_of_members; k < number_of_members + critical_vertex_neighbors.size(); k++) {
             if (adj_counters[k] < critical_vertex_neighbors.size() - 1) {
@@ -1663,28 +1667,22 @@ int h_critical_vertex_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int
 
 
     // DIAMTER PRUNING
-    number_of_removed = 0;
+    (*hd.remaining_count) = 0;
+
     // remove all cands who are not within 2hops of all newly added cands
     for (int k = number_of_members; k < total_vertices; k++) {
         if (adj_counters[k] != critical_vertex_neighbors.size()) {
             vertices[k].label = -1;
-            number_of_removed++;
+        }
+        else if (vertices[k].exdeg + vertices[k].indeg >= h_get_mindeg(number_of_members + 1)){
+            hd.candidate_indegs[(*hd.remaining_count)++] = vertices[k].indeg;
         }
     }
-    qsort(vertices, total_vertices, sizeof(Vertex), h_sort_vert);
-
-    delete adj_counters;
-
-    // update exdeg of vertices connected to removed cands
-    h_update_degrees(hg, vertices, total_vertices, number_of_removed);
-
-    total_vertices -= number_of_removed;
-    number_of_candidates -= number_of_removed;
-
-
 
     // DEGREE-BASED PRUNING
     method_return = h_degree_pruning(hg, hd, vertices, total_vertices, number_of_candidates, number_of_members, upper_bound, lower_bound, min_ext_deg);
+
+    delete adj_counters;
 
     // if vertex in x found as not extendable, check if current set is clique and continue to next iteration
     if (method_return) {
