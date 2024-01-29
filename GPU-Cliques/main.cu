@@ -26,7 +26,7 @@ using namespace std;
 
 // global memory size: 1.500.000.000 ints
 #define TASKS_SIZE 20000000
-#define EXPAND_THRESHOLD 352
+#define EXPAND_THRESHOLD 704
 #define BUFFER_SIZE 100000000
 #define BUFFER_OFFSET_SIZE 1000000
 #define CLIQUES_SIZE 2000000
@@ -50,7 +50,7 @@ using namespace std;
 #define VERTICES_SIZE 70
  
 // threads info
-#define BLOCK_SIZE 512
+#define BLOCK_SIZE 1024
 #define NUM_OF_BLOCKS 22
 #define WARP_SIZE 32
 
@@ -1557,9 +1557,6 @@ int h_critical_vertex_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int
 
     bool method_return;
 
-    // DEBUG
-    bool debug = false;
-
 
 
     // initialize vertex order map
@@ -1593,6 +1590,8 @@ int h_critical_vertex_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int
         }
     }
 
+
+
     // reset vertex order map
     for (int i = 0; i < total_vertices; i++) {
         hd.vertex_order_map[vertices[i].vertexid] = -1;
@@ -1611,6 +1610,8 @@ int h_critical_vertex_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int
             break;
         }
     }
+
+
 
     // if there were any neighbors of critical vertices
     if (number_of_crit_adj > 0)
@@ -3377,7 +3378,7 @@ __global__ void d_expand_level(GPU_Data dd)
 
 
             // CRITICAL VERTEX PRUNING
-            method_return = d_critical_vertex_pruning(dd, wd, ld);
+            //method_return = d_critical_vertex_pruning(dd, wd, ld);
 
             // critical fail, cannot be clique continue onto next iteration
             if (method_return == 2) {
@@ -3731,22 +3732,10 @@ __device__ int d_add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     int phelper2;
     bool failed_found;
 
+
+
     // ADD ONE VERTEX
     pvertexid = ld.vertices[wd.number_of_members[ld.wib_idx]].vertexid;
-
-
-
-    // DEBUG
-    bool debug = false;
-    __syncwarp();
-    if ((ld.idx % WARP_SIZE == 0) && wd.number_of_members[ld.wib_idx] == 2 && ld.vertices[wd.number_of_members[ld.wib_idx]].vertexid == 1204 && ld.vertices[wd.number_of_members[ld.wib_idx] - 1].vertexid == 478 && 
-        ld.vertices[wd.number_of_members[ld.wib_idx] - 2].vertexid == 553) {
-        //d_print_vertices(ld.vertices, wd.total_vertices[ld.wib_idx]);
-        debug = true;
-    }
-    __syncwarp();
-
-
 
     if ((ld.idx % WARP_SIZE) == 0) {
         ld.vertices[wd.number_of_members[ld.wib_idx]].label = 1;
@@ -3784,10 +3773,7 @@ __device__ int d_add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     return 0;
 }
 
-// TODO - !!! this is old and doesnt work at all, fix
-// TODO - improve sort function for this method and others do only check necessary conditions
-// TODO - doesnt work
-// returns 2, if too many vertices pruned to be considered, 1 if failed found or invalid bound, 0 otherwise
+// returns 2, if critical fail, 1 if failed found or invalid bound, 0 otherwise
 __device__ int d_critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 {
     // (WVERTICES_SIZE * (ld.idx / WARP_SIZE)) /warp write location to adjacencies
@@ -3802,13 +3788,7 @@ __device__ int d_critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data
     int phelper1;
     int phelper2;
 
-    int pvertexid;
     bool failed_found;
-    int number_of_removed_candidates;
-    int number_of_critical_neighbors;
-
-    // DEBUG 
-    bool debug = false;
 
 
 
@@ -3818,13 +3798,13 @@ __device__ int d_critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data
 
         // if they are a critical vertex
         if (ld.vertices[k].indeg + ld.vertices[k].exdeg == dd.minimum_degrees[wd.number_of_members[ld.wib_idx] + wd.lower_bound[ld.wib_idx]] && ld.vertices[k].exdeg > 0) {
-            pvertexid = ld.vertices[k].vertexid;
+            phelper1 = ld.vertices[k].vertexid;
 
             // iterate through all candidates
             for (int i = wd.number_of_members[ld.wib_idx] + (ld.idx % WARP_SIZE); i < wd.total_vertices[ld.wib_idx]; i += WARP_SIZE) {
                 if (ld.vertices[i].label != 4) {
                     // if candidate is neighbor of critical vertex mark as such
-                    if (d_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[pvertexid], dd.onehop_offsets[pvertexid + 1] - dd.onehop_offsets[pvertexid], ld.vertices[i].vertexid) > -1) {
+                    if (d_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[phelper1], dd.onehop_offsets[phelper1 + 1] - dd.onehop_offsets[phelper1], ld.vertices[i].vertexid) > -1) {
                         ld.vertices[i].label = 4;
                         //debug = true;
                     }
@@ -3834,22 +3814,10 @@ __device__ int d_critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data
         __syncwarp();
     }
 
-    // DEBUG
-    debug = __any_sync(0xFFFFFFFF, debug);
-    if (ld.idx == 0 && debug == true) {
-        d_print_vertices(ld.vertices, wd.total_vertices[ld.wib_idx]);
-    }
-    __syncwarp();
+
 
     // sort vertices so that critical vertex adjacent candidates are immediately after vertices within the clique
     d_sort(ld.vertices + wd.number_of_members[ld.wib_idx], wd.number_of_candidates[ld.wib_idx], (ld.idx % WARP_SIZE), d_sort_vert_cv);
-
-    // DEBUG
-    __syncwarp();
-    if (ld.idx == 0 && debug == true) {
-        d_print_vertices(ld.vertices, wd.total_vertices[ld.wib_idx]);
-    }
-    __syncwarp();
 
     // TODO - parallelize this and put in local memory
     // count number of critical adjacent vertices
@@ -3865,6 +3833,8 @@ __device__ int d_critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data
         }
     }
 
+
+
     failed_found = false;
 
     // reset adjacencies
@@ -3875,43 +3845,20 @@ __device__ int d_critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data
     // if there were any neighbors of critical vertices
     if (wd.number_of_crit_adj[ld.wib_idx] > 0)
     {
-        // DEBUG
-        __syncwarp();
-        if (ld.idx == 0 && debug == true) {
-            printf("\n");
-            for (int i = 0; i < wd.total_vertices[ld.wib_idx]; i++) {
-                printf("%i ", dd.adjacencies[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + i]);
-            }
-            printf("\n");
-        }
-        __syncwarp();
-
         // iterate through all vertices and update their degrees as if critical adjacencies were added and keep track of how many critical adjacencies they are adjacent to
         for (int k = (ld.idx % WARP_SIZE); k < wd.total_vertices[ld.wib_idx]; k += WARP_SIZE) {
-            pvertexid = ld.vertices[k].vertexid;
+            phelper1 = ld.vertices[k].vertexid;
 
             for (int l = wd.number_of_members[ld.wib_idx]; l < wd.number_of_members[ld.wib_idx] + wd.number_of_crit_adj[ld.wib_idx]; l++) {
-                if (d_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[pvertexid], dd.onehop_offsets[pvertexid + 1] - dd.onehop_offsets[pvertexid], ld.vertices[l].vertexid) > -1) {
+                if (d_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[phelper1], dd.onehop_offsets[phelper1 + 1] - dd.onehop_offsets[phelper1], ld.vertices[l].vertexid) > -1) {
                     ld.vertices[k].indeg++;
                     ld.vertices[k].exdeg--;
                 }
 
-                if (d_bsearch_array(dd.twohop_neighbors + dd.twohop_offsets[pvertexid], dd.twohop_offsets[pvertexid + 1] - dd.twohop_offsets[pvertexid], ld.vertices[l].vertexid) > -1) {
+                if (d_bsearch_array(dd.twohop_neighbors + dd.twohop_offsets[phelper1], dd.twohop_offsets[phelper1 + 1] - dd.twohop_offsets[phelper1], ld.vertices[l].vertexid) > -1) {
                     dd.adjacencies[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + k]++;
                 }
             }
-        }
-        __syncwarp();
-
-        // DEBUG
-        __syncwarp();
-        if (ld.idx == 0 && debug == true) {
-            printf("\n");
-            for (int i = 0; i < wd.total_vertices[ld.wib_idx]; i++) {
-                printf("%i ", dd.adjacencies[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + i]);
-            }
-            printf("\n");
-            d_print_vertices(ld.vertices, wd.total_vertices[ld.wib_idx]);
         }
         __syncwarp();
 
@@ -3947,13 +3894,6 @@ __device__ int d_critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data
         if ((ld.idx % WARP_SIZE) == 0) {
             wd.number_of_members[ld.wib_idx] += wd.number_of_crit_adj[ld.wib_idx];
             wd.number_of_candidates[ld.wib_idx] -= wd.number_of_crit_adj[ld.wib_idx];
-        }
-        __syncwarp();
-
-        // DEBUG
-        __syncwarp();
-        if (ld.idx == 0 && debug == true) {
-            d_print_vertices(ld.vertices, wd.total_vertices[ld.wib_idx]);
         }
         __syncwarp();
     }
@@ -3996,28 +3936,10 @@ __device__ int d_critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data
     }
     __syncwarp();
 
-    // DEBUG
-    __syncwarp();
-    if (ld.idx == 0 && debug == true) {
-        printf("\n");
-        for (int i = 0; i < wd.remaining_count[ld.wib_idx]; i++) {
-            printf("%i ", dd.candidate_indegs[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + i]);
-        }
-        printf("\n");
-    }
-    __syncwarp();
-
 
 
     // DEGREE BASED PRUNING
     failed_found = d_degree_pruning(dd, wd, ld);
-
-    // DEBUG
-    __syncwarp();
-    if (ld.idx == 0 && debug == true) {
-        d_print_vertices(ld.vertices, wd.total_vertices[ld.wib_idx]);
-    }
-    __syncwarp();
 
     // if vertex in x found as not extendable continue to next iteration
     if (failed_found) {
