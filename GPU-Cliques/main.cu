@@ -25,7 +25,7 @@ using namespace std;
 // Shared Memory: 48 KB
 
 // global memory size: 1.500.000.000 ints
-#define TASKS_SIZE 2000000
+#define TASKS_SIZE 20000000
 #define EXPAND_THRESHOLD 352
 #define BUFFER_SIZE 100000000
 #define BUFFER_OFFSET_SIZE 1000000
@@ -34,7 +34,7 @@ using namespace std;
 #define CLIQUES_PERCENT 50
 
 // buffer size for CPU onehop and twohop adjacency array and offsets, ensure these are large enough
-#define OFFSETS_SIZE 20000
+#define OFFSETS_SIZE 40000
 #define LVL1ADJ_SIZE 400000
 #define LVL2ADJ_SIZE 100000000
 
@@ -55,8 +55,8 @@ using namespace std;
 #define WARP_SIZE 32
 
 // cpu settings
-#define CPU_LEVELS 0
-#define CPU_EXPAND_THRESHOLD 704
+#define CPU_LEVELS 1
+#define CPU_EXPAND_THRESHOLD 1
 
 // debug toggle
 #define DEBUG_TOGGLE 1
@@ -495,7 +495,7 @@ __device__ void d_print_vertices(Vertex* vertices, int size);
 
 
 // TODO (HIGH PRIORITY)
-// - critical vertex on gpu
+// - 
 
 // TODO (LOW PRIORITY)
 // - doesnt run when cpu et is greater than gpu et
@@ -3807,7 +3807,7 @@ __device__ int d_critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data
     int number_of_removed_candidates;
     int number_of_critical_neighbors;
 
-    // DEBUG
+    // DEBUG 
     bool debug = false;
 
 
