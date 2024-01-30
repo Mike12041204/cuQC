@@ -3843,13 +3843,13 @@ __device__ int d_critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data
         for (int k = (ld.idx % WARP_SIZE); k < wd.total_vertices[ld.wib_idx]; k += WARP_SIZE) {
             phelper1 = ld.vertices[k].vertexid;
 
-            for (int l = wd.number_of_members[ld.wib_idx]; l < wd.number_of_members[ld.wib_idx] + number_of_crit_adj; l++) {
-                if (d_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[phelper1], dd.onehop_offsets[phelper1 + 1] - dd.onehop_offsets[phelper1], ld.vertices[l].vertexid) > -1) {
+            for (int i = wd.number_of_members[ld.wib_idx]; i < wd.number_of_members[ld.wib_idx] + number_of_crit_adj; i++) {
+                if (d_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[phelper1], dd.onehop_offsets[phelper1 + 1] - dd.onehop_offsets[phelper1], ld.vertices[i].vertexid) > -1) {
                     ld.vertices[k].indeg++;
                     ld.vertices[k].exdeg--;
                 }
 
-                if (d_bsearch_array(dd.twohop_neighbors + dd.twohop_offsets[phelper1], dd.twohop_offsets[phelper1 + 1] - dd.twohop_offsets[phelper1], ld.vertices[l].vertexid) > -1) {
+                if (d_bsearch_array(dd.twohop_neighbors + dd.twohop_offsets[phelper1], dd.twohop_offsets[phelper1 + 1] - dd.twohop_offsets[phelper1], ld.vertices[i].vertexid) > -1) {
                     dd.adjacencies[(WVERTICES_SIZE * (ld.idx / WARP_SIZE)) + k]++;
                 }
             }
