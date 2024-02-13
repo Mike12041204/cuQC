@@ -107,7 +107,7 @@ public:
 
         // set variables and initialize twohop arrays
         number_of_vertices = vertex_count;
-        number_of_edges = number_count / 2;
+        number_of_edges = number_count;
 
 
 
