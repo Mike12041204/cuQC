@@ -31,7 +31,7 @@ using namespace std;
 #define BUFFER_OFFSET_SIZE 1000000
 #define CLIQUES_SIZE 200000
 #define CLIQUES_OFFSET_SIZE 20000
-#define CLIQUES_PERCENT .1
+#define CLIQUES_PERCENT 50
 
 // per warp
 #define WCLIQUES_SIZE 5000
@@ -3427,7 +3427,7 @@ __global__ void transfer_buffers(GPU_Data dd)
 
     // HANDLE CLIQUES
     // only first thread for each 
-    if ((idx % WARP_SIZE) == 0 && cliques_write[wib_idx] > (CLIQUES_SIZE * CLIQUES_PERCENT)) {
+    if ((idx % WARP_SIZE) == 0 && cliques_write[wib_idx] > (CLIQUES_SIZE * ((double)CLIQUES_PERCENT / 100.0))) {
         atomicExch((int*)dd.dumping_cliques, true);
     }
 }
