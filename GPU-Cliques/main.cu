@@ -29,9 +29,9 @@ using namespace std;
 #define EXPAND_THRESHOLD 616
 #define BUFFER_SIZE 100000000
 #define BUFFER_OFFSET_SIZE 1000000
-#define CLIQUES_SIZE 2000000
+#define CLIQUES_SIZE 200000
 #define CLIQUES_OFFSET_SIZE 20000
-#define CLIQUES_PERCENT 50
+#define CLIQUES_PERCENT .1
 
 // buffer size for CPU onehop and twohop adjacency array and offsets, ensure these are large enough
 #define OFFSETS_SIZE 40000
@@ -3544,8 +3544,8 @@ __global__ void transfer_buffers(GPU_Data dd)
     }
 
     // HANDLE CLIQUES
-    // only first thread for each warp
-    if ((idx % WARP_SIZE) == 0 && cliques_write[wib_idx] > (CLIQUES_SIZE * (CLIQUES_PERCENT / 100.0))) {
+    // only first thread for each 
+    if ((idx % WARP_SIZE) == 0 && cliques_write[wib_idx] > (CLIQUES_SIZE * CLIQUES_PERCENT)) {
         atomicExch((int*)dd.dumping_cliques, true);
     }
 }

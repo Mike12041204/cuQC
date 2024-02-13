@@ -23,9 +23,6 @@
     <Text Include="amazon.txt">
       <Filter>graph_files</Filter>
     </Text>
-    <Text Include="hyves.txt">
-      <Filter>graph_files</Filter>
-    </Text>
   </ItemGroup>
   <ItemGroup>
     <Image Include="DS_Diagram.jpg" />
@@ -34,5 +31,8 @@
     <Filter Include="graph_files">
       <UniqueIdentifier>{eaef58fd-e79e-4f61-bddb-736bb2ff83dd}</UniqueIdentifier>
     </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Source.cpp" />
   </ItemGroup>
 </Project>
