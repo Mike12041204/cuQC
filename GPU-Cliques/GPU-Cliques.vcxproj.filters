@@ -33,6 +33,6 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Source.cpp" />
+    <ClCompile Include="adjToSer.cpp" />
   </ItemGroup>
 </Project>

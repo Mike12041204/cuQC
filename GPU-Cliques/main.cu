@@ -33,11 +33,6 @@ using namespace std;
 #define CLIQUES_OFFSET_SIZE 20000
 #define CLIQUES_PERCENT .1
 
-// buffer size for CPU onehop and twohop adjacency array and offsets, ensure these are large enough
-#define OFFSETS_SIZE 40000
-#define LVL1ADJ_SIZE 400000
-#define LVL2ADJ_SIZE 100000000
-
 // per warp
 #define WCLIQUES_SIZE 5000
 #define WCLIQUES_OFFSET_SIZE 500
@@ -90,143 +85,30 @@ class CPU_Graph
 
     CPU_Graph(ifstream& graph_stream)
     {
-        graph_stream.seekg(0, graph_stream.end);
-        string graph_text(graph_stream.tellg(), 0);
-        graph_stream.seekg(0);
-        graph_stream.read(const_cast<char*>(graph_text.data()), graph_text.size());
+        graph_stream >> number_of_vertices;
+        graph_stream >> number_of_edges;
+        graph_stream >> number_of_lvl2adj;
 
-        onehop_offsets = new uint64_t[OFFSETS_SIZE];
-        onehop_neighbors = new int[LVL1ADJ_SIZE];
-        twohop_neighbors = new int[LVL2ADJ_SIZE];
-
-        onehop_offsets[0] = 0;
-        number_of_lvl2adj = 0;
-
-        int vertex_count = 0;
-        int number_count = 0;
-        int current_number = 0;
-        bool empty = true;
-
-
-
-        // TODO - way to detect and handle these cases without changing code?
-        // TWO FORMATS SO FAR
-        // 1 -  VSCode \r\n between lines, no ending character
-        // 2 - Visual Studio \n between lines, numerous \0 ending characters
-        
-        // parse graph file assume adj are seperated by spaces ' ' and vertices are seperated by newlines "\r\n"
-        for (int i = 0; i < graph_text.size(); i++) {
-            char character = graph_text[i];
-
-            // line depends on whether newline is "\r\n" or '\n'
-            if (character == '\n') {
-                if (!empty) {
-                    onehop_neighbors[number_count++] = current_number;
-                }
-                onehop_offsets[++vertex_count] = number_count;
-                current_number = 0;
-                // line depends on whether newline is "\r\n" or '\n'
-                //i++;
-                empty = true;
-            }
-            else if (character == ' ') {
-                onehop_neighbors[number_count++] = current_number;
-                current_number = 0;
-            }
-            else if (character == '\0') {
-                // line depends on whether newline is "\r\n" or '\n'
-                break;
-            }
-            else {
-                current_number = current_number * 10 + (graph_text[i] - '0');
-                empty = false;
-            }
-        }
-
-        // line depends on whether newline is "\r\n" or '\n'
-        // handle last element
-        if (!empty) {
-            onehop_neighbors[number_count++] = current_number;
-        }
-        onehop_offsets[++vertex_count] = number_count;
-
-        // set variables and initialize twohop arrays
-        number_of_vertices = vertex_count;
-        number_of_edges = number_count / 2;
-        
-
-
+        onehop_neighbors = new int[number_of_edges];
+        onehop_offsets = new uint64_t[number_of_vertices + 1];
+        twohop_neighbors = new int[number_of_lvl2adj];
         twohop_offsets = new uint64_t[number_of_vertices + 1];
 
-        twohop_offsets[0] = 0;
-
-        bool* twohop_flag_DIA;
-        twohop_flag_DIA = new bool[number_of_vertices];
-        memset(twohop_flag_DIA, true, number_of_vertices * sizeof(bool));
-
-        // handle lvl2 adj
-        for (int i = 0; i < vertex_count; i++) {
-            for (int j = onehop_offsets[i]; j < onehop_offsets[i + 1]; j++) {
-                int lvl1adj = onehop_neighbors[j];
-                if (twohop_flag_DIA[lvl1adj]) {
-                    twohop_neighbors[number_of_lvl2adj++] = lvl1adj;
-                    twohop_flag_DIA[lvl1adj] = false;
-                }
-
-                for (int k = onehop_offsets[lvl1adj]; k < onehop_offsets[lvl1adj + 1]; k++) {
-                    int lvl2adj = onehop_neighbors[k];
-                    if (twohop_flag_DIA[lvl2adj] && lvl2adj != i) {
-                        twohop_neighbors[number_of_lvl2adj++] = lvl2adj;
-                        twohop_flag_DIA[lvl2adj] = false;
-                    }
-                }
-            }
-
-            twohop_offsets[i + 1] = number_of_lvl2adj;
-
-            for (int j = twohop_offsets[i]; j < twohop_offsets[i + 1]; j++) {
-                twohop_flag_DIA[twohop_neighbors[j]] = true;
-            }
-
-            // sort adjacencies
-            if (onehop_offsets[i + 1] != onehop_offsets[i]) {
-                qsort(onehop_neighbors + onehop_offsets[i], onehop_offsets[i + 1] - onehop_offsets[i], sizeof(int), h_sort_asce);
-            }
-            if (twohop_offsets[i + 1] != twohop_offsets[i]) {
-                qsort(twohop_neighbors + twohop_offsets[i], twohop_offsets[i + 1] - twohop_offsets[i], sizeof(int), h_sort_asce);
-            }
+        for (int i = 0; i < number_of_edges; i++) {
+            graph_stream >> onehop_neighbors[i];
         }
 
-
-
-        // DEBUG
-        if (DEBUG_TOGGLE) {
-            cout << "|V| = " << vertex_count << " |E| = " << number_count / 2 << " lvl1adj: " << number_count << " lvl2adj: " << number_of_lvl2adj << endl;
-
-            if (vertex_count > OFFSETS_SIZE || number_count > LVL1ADJ_SIZE || number_of_lvl2adj > LVL2ADJ_SIZE) {
-                memory_error = true;
-            }
-        }
-        if (false) {
-            cout << graph_text << "\n!!!" << endl;
-            for (int i = 0; i < vertex_count; i++) {
-                cout << i << ": " << flush;
-                for (int j = onehop_offsets[i]; j < onehop_offsets[i + 1]; j++) {
-                    cout << onehop_neighbors[j] << " " << flush;
-                }
-                cout << endl;
-            }
-            cout << "!!!" << endl;
-            for (int i = 0; i < vertex_count; i++) {
-                cout << i << ": " << flush;
-                for (int j = twohop_offsets[i]; j < twohop_offsets[i + 1]; j++) {
-                    cout << twohop_neighbors[j] << " " << flush;
-                }
-                cout << endl;
-            }
+        for (int i = 0; i < number_of_vertices + 1; i++) {
+            graph_stream >> onehop_offsets[i];
         }
 
-        delete twohop_flag_DIA;
+        for (int i = 0; i < number_of_lvl2adj; i++) {
+            graph_stream >> twohop_neighbors[i];
+        }
+
+        for (int i = 0; i < number_of_vertices + 1; i++) {
+            graph_stream >> twohop_offsets[i];
+        }
     }
 
     ~CPU_Graph() 
