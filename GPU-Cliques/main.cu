@@ -407,9 +407,6 @@ int* minimum_degrees;
 // MAIN
 int main(int argc, char* argv[])
 {
-    // TIME
-    auto start = std::chrono::high_resolution_clock::now();
-
     // ENSURE PROPER USAGE
     if (argc != 5) {
         printf("Usage: ./main <graph_file> <gamma> <min_size> <output_file.txt>\n");
@@ -431,6 +428,13 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+
+
+    // TIME
+    auto start = std::chrono::high_resolution_clock::now();
+
+
+
     // GRAPH / MINDEGS
     cout << ">:PRE-PROCESSING" << endl;
     CPU_Graph hg(graph_stream);
@@ -438,24 +442,45 @@ int main(int argc, char* argv[])
     calculate_minimum_degrees(hg);
     ofstream temp_results("temp.txt");
 
+
+
+    // TIME
+    auto stop = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
+    cout << ">:LOADING TIME: " << duration.count() << " ms" << endl;
+
+
+
     // DEBUG
     if (DEBUG_TOGGLE && memory_error) {
         cout << "!!! GRAPH ARRAY ERROR !!!" << endl;
     }
-    //print_CPU_Graph(hg);
+
+
 
     // SEARCH
     search(hg, temp_results);
 
     temp_results.close();
 
+
+
+    // TIME
+    auto start1 = std::chrono::high_resolution_clock::now();
+
+
+
     // RM NON-MAX
     RemoveNonMax("temp.txt", argv[4]);
 
+
+
     // TIME
-    auto stop = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
-    cout << ">:TIME: " << duration.count() << " ms" << endl;
+    auto stop1 = std::chrono::high_resolution_clock::now();
+    auto duration1 = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
+    cout << ">:REMOVE NON-MAX TIME: " << duration.count() << " ms" << endl;
+
+
 
     cout << ">:PROGRAM END" << endl;
     return 0;
@@ -482,13 +507,24 @@ void search(CPU_Graph& hg, ofstream& temp_results)
     CPU_Cliques hc;
     GPU_Data dd;
 
+
+
     // HANDLE MEMORY
     allocate_memory(hd, dd, hc, hg);
     cudaDeviceSynchronize();
 
+
+
+    // TIME
+    auto start = std::chrono::high_resolution_clock::now();
+
+
+
     // INITIALIZE TASKS
     cout << ">:INITIALIZING TASKS" << endl;
     initialize_tasks(hg, hd);
+
+
 
     // DEBUG
     if (DEBUG_TOGGLE) {
@@ -498,7 +534,8 @@ void search(CPU_Graph& hg, ofstream& temp_results)
         }
         h_print_Data_Sizes(hd, hc);
     }
-    //print_CPU_Data(hd);
+
+
 
     // CPU EXPANSION
     // cpu levels is multiplied by two to ensure that data ends up in tasks1, this allows us to always copy tasks1 without worry like before hybrid cpu approach
@@ -511,6 +548,8 @@ void search(CPU_Graph& hg, ofstream& temp_results)
             flush_cliques(hc, temp_results);
         }
 
+
+
         // DEBUG
         if (DEBUG_TOGGLE) {
             h_print_Data_Sizes(hd, hc);
@@ -519,15 +558,13 @@ void search(CPU_Graph& hg, ofstream& temp_results)
 
     flush_cliques(hc, temp_results);
 
+
+
     // TRANSFER TO GPU
     move_to_gpu(hd, dd);
     cudaDeviceSynchronize();
 
-    // DEBUG
-    //print_GPU_Graph(dd, hg);
-    //print_CPU_Data(hd);
-    //print_GPU_Data(dd);
-    //print_Data_Sizes(dd);
+
 
     // EXPAND LEVEL
     cout << ">:BEGINNING EXPANSION" << endl;
@@ -546,9 +583,6 @@ void search(CPU_Graph& hg, ofstream& temp_results)
         if (DEBUG_TOGGLE) {
             if (print_Warp_Data_Sizes_Every(dd, 1)) { break; }
         }
-        //print_WClique_Buffers(dd);
-        //print_WTask_Buffers(dd);
-        //print_All_Warp_Data_Sizes_Every(dd, 1);
 
         // consolidate all the warp tasks/cliques buffers into the next global tasks array, buffer, and cliques
         transfer_buffers<<<NUM_OF_BLOCKS, BLOCK_SIZE>>>(dd);
@@ -567,17 +601,24 @@ void search(CPU_Graph& hg, ofstream& temp_results)
             dump_cliques(hc, dd, temp_results);
         }
 
+
+
         // DEBUG
         if (DEBUG_TOGGLE) {
             if (print_Data_Sizes_Every(dd, 1)) { break; }
         }
-        //print_GPU_Data(dd);
-        //print_GPU_Cliques(dd);
-        //print_debug(dd);
-        //print_idebug(dd);
     }
 
     dump_cliques(hc, dd, temp_results);
+
+
+
+    // TIME
+    auto stop = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
+    cout << ">:ENUMERATION TIME: " << duration.count() << " ms" << endl;
+
+
 
     free_memory(hd, dd, hc);
 }
