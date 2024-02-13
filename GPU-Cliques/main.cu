@@ -478,7 +478,7 @@ int main(int argc, char* argv[])
     // TIME
     auto stop1 = std::chrono::high_resolution_clock::now();
     auto duration1 = std::chrono::duration_cast<std::chrono::milliseconds>(stop1 - start1);
-    cout << ">:REMOVE NON-MAX TIME: " << duration.count() << " ms" << endl;
+    cout << ">:REMOVE NON-MAX TIME: " << duration1.count() << " ms" << endl;
 
 
 
