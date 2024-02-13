@@ -447,7 +447,7 @@ int main(int argc, char* argv[])
     // TIME
     auto stop = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
-    cout << ">:LOADING TIME: " << duration.count() << " ms" << endl;
+    cout << "--->:LOADING TIME: " << duration.count() << " ms" << endl;
 
 
 
@@ -478,7 +478,7 @@ int main(int argc, char* argv[])
     // TIME
     auto stop1 = std::chrono::high_resolution_clock::now();
     auto duration1 = std::chrono::duration_cast<std::chrono::milliseconds>(stop1 - start1);
-    cout << ">:REMOVE NON-MAX TIME: " << duration1.count() << " ms" << endl;
+    cout << "--->:REMOVE NON-MAX TIME: " << duration1.count() << " ms" << endl;
 
 
 
@@ -616,7 +616,7 @@ void search(CPU_Graph& hg, ofstream& temp_results)
     // TIME
     auto stop = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
-    cout << ">:ENUMERATION TIME: " << duration.count() << " ms" << endl;
+    cout << "--->:ENUMERATION TIME: " << duration.count() << " ms" << endl;
 
 
 
