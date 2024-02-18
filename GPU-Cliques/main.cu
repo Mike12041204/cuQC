@@ -610,8 +610,6 @@ void search(CPU_Graph& hg, ofstream& temp_results)
         }
     }
 
-    dump_cliques(hc, dd, temp_results);
-
 
 
     // TIME
@@ -620,6 +618,8 @@ void search(CPU_Graph& hg, ofstream& temp_results)
     cout << "--->:ENUMERATION TIME: " << duration.count() << " ms" << endl;
 
 
+
+    dump_cliques(hc, dd, temp_results);
 
     free_memory(hd, dd, hc);
 }
