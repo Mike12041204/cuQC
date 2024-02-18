@@ -54,7 +54,7 @@ using namespace std;
 #define CPU_EXPAND_THRESHOLD 1
 
 // debug toggle
-#define DEBUG_TOGGLE 1
+#define DEBUG_TOGGLE 0
 
 // VERTEX DATA
 struct Vertex
@@ -407,6 +407,11 @@ int* minimum_degrees;
 // MAIN
 int main(int argc, char* argv[])
 {
+    // TIME
+    auto start2 = std::chrono::high_resolution_clock::now();
+
+
+
     // ENSURE PROPER USAGE
     if (argc != 5) {
         printf("Usage: ./main <graph_file> <gamma> <min_size> <output_file.txt>\n");
@@ -479,6 +484,10 @@ int main(int argc, char* argv[])
     auto stop1 = std::chrono::high_resolution_clock::now();
     auto duration1 = std::chrono::duration_cast<std::chrono::milliseconds>(stop1 - start1);
     cout << "--->:REMOVE NON-MAX TIME: " << duration1.count() << " ms" << endl;
+
+    auto stop2 = std::chrono::high_resolution_clock::now();
+    auto duration2 = std::chrono::duration_cast<std::chrono::milliseconds>(stop2 - start2);
+    cout << "--->:TOTAL TIME: " << duration2.count() << " ms" << endl;
 
 
 
