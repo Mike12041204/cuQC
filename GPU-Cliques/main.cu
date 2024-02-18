@@ -25,28 +25,28 @@ using namespace std;
 // Shared Memory: 48 KB
 
 // global memory size: 1.500.000.000 ints
-#define TASKS_SIZE 20000000
-#define EXPAND_THRESHOLD 616
-#define BUFFER_SIZE 100000000
-#define BUFFER_OFFSET_SIZE 1000000
-#define CLIQUES_SIZE 200000
-#define CLIQUES_OFFSET_SIZE 20000
+#define TASKS_SIZE 100000000
+#define EXPAND_THRESHOLD 6048
+#define BUFFER_SIZE 1000000000
+#define BUFFER_OFFSET_SIZE 10000000
+#define CLIQUES_SIZE 100000000
+#define CLIQUES_OFFSET_SIZE 1000000
 #define CLIQUES_PERCENT 50
 
 // per warp
-#define WCLIQUES_SIZE 5000
-#define WCLIQUES_OFFSET_SIZE 500
-#define WTASKS_SIZE 50000
-#define WTASKS_OFFSET_SIZE 5000
+#define WCLIQUES_SIZE 10000
+#define WCLIQUES_OFFSET_SIZE 1000
+#define WTASKS_SIZE 300000
+#define WTASKS_OFFSET_SIZE 10000
 // should be a multiple of 32 as to not waste space
-#define WVERTICES_SIZE 3200
+#define WVERTICES_SIZE 32000
 
 // shared memory size: 12.300 ints
-#define VERTICES_SIZE 70
+#define VERTICES_SIZE 80
  
 // threads info
 #define BLOCK_SIZE 896
-#define NUM_OF_BLOCKS 22
+#define NUM_OF_BLOCKS 216
 #define WARP_SIZE 32
 
 // cpu settings
@@ -67,8 +67,6 @@ struct Vertex
 };
 
 // CPU GRAPH / CONSTRUCTOR
-int h_sort_asce(const void* a, const void* b);
-bool memory_error = false;
 class CPU_Graph
 {
     public:
@@ -312,6 +310,7 @@ int h_sort_vert(const void* a, const void* b);
 int h_sort_vert_cv(const void* a, const void* b);
 int h_sort_vert_Q(const void* a, const void* b);
 int h_sort_vert_LU(const void* a, const void* b);
+int h_sort_asce(const void* a, const void* b);
 int h_sort_desc(const void* a, const void* b);
 inline int h_get_mindeg(int clique_size);
 inline bool h_cand_isvalid(Vertex vertex, int clique_size);
@@ -453,13 +452,6 @@ int main(int argc, char* argv[])
     auto stop = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
     cout << "--->:LOADING TIME: " << duration.count() << " ms" << endl;
-
-
-
-    // DEBUG
-    if (DEBUG_TOGGLE && memory_error) {
-        cout << "!!! GRAPH ARRAY ERROR !!!" << endl;
-    }
 
 
 
