@@ -389,6 +389,7 @@ __device__ void d_print_vertices(Vertex* vertices, int size);
 // - dont need lvl2adj in all places anymore
 // - changing wtasks size causes unpredictable results
 // - dumping cliques causes seg fault, unimportant as this never happens unless cliques is tiny
+// - dumping cliques never happens
 
 
 
