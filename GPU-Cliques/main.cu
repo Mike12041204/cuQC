@@ -18,12 +18,6 @@
 #include <device_atomic_functions.h>
 using namespace std;
 
-// GPU: GTX 1660 Super
-// SM's: 22
-// Threads per SM: 1024
-// Global Memory: 6 GB
-// Shared Memory: 48 KB
-
 // global memory size: 1.500.000.000 ints
 #define TASKS_SIZE 100000000
 #define EXPAND_THRESHOLD 6048
