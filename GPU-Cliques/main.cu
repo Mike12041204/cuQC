@@ -625,7 +625,7 @@ void search(CPU_Graph& hg, ofstream& temp_results)
     free_memory(hd, dd, hc);
 }
 
-// allocates memory for the data structures on the host and device 
+// allocates memory for the data structures on the host and device  
 void allocate_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc, CPU_Graph& hg)
 {
     int number_of_warps = (NUM_OF_BLOCKS * BLOCK_SIZE) / WARP_SIZE;
