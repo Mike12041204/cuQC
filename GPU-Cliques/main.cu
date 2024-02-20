@@ -492,7 +492,7 @@ int main(int argc, char* argv[])
 
 // --- HOST METHODS --- 
 
-// initializes minimum degrees array
+// initializes minimum degrees array 
 void calculate_minimum_degrees(CPU_Graph& hg)
 {
     minimum_degrees = new int[hg.number_of_vertices + 1];
