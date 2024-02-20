@@ -28,4 +28,5 @@
 10 - HYBRID CPU / GPU EXPANSION - Program has exact control of number of tasks that will be handled on the CPU. As the early tasks can be very computationally expensive
      performing the first round of pruning or even just the first few tasks on the CPU can significantly decerase the memory usage on the GPU.
     
-11 - SERIALIZED GRAPH READING - 
+11 - SERIALIZED GRAPH READING - Our program reads grpahs in a serialized format were each line of the file directly represents a variable or array which we need from the
+     graph, in this way we can prevent full pre-processing each time by directly storing information such as the twohop adjacencies of every vertex.
