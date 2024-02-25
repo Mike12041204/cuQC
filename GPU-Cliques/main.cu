@@ -19,28 +19,28 @@
 using namespace std;
 
 // global memory size: 1.500.000.000 ints
-#define TASKS_SIZE 100000000
-#define EXPAND_THRESHOLD 6048
-#define BUFFER_SIZE 1000000000
-#define BUFFER_OFFSET_SIZE 10000000
-#define CLIQUES_SIZE 100000000
-#define CLIQUES_OFFSET_SIZE 1000000
+#define TASKS_SIZE 1000000
+#define EXPAND_THRESHOLD 176
+#define BUFFER_SIZE 10000000
+#define BUFFER_OFFSET_SIZE 100000
+#define CLIQUES_SIZE 150000
+#define CLIQUES_OFFSET_SIZE 10000
 #define CLIQUES_PERCENT 50
 
 // per warp
 #define WCLIQUES_SIZE 10000
 #define WCLIQUES_OFFSET_SIZE 1000
-#define WTASKS_SIZE 300000
-#define WTASKS_OFFSET_SIZE 10000
+#define WTASKS_SIZE 30000
+#define WTASKS_OFFSET_SIZE 1000
 // should be a multiple of 32 as to not waste space
-#define WVERTICES_SIZE 32000
+#define WVERTICES_SIZE 3200
 
 // shared memory size: 12.300 ints
 #define VERTICES_SIZE 80
  
 // threads info
-#define BLOCK_SIZE 896
-#define NUM_OF_BLOCKS 216
+#define BLOCK_SIZE 256
+#define NUM_OF_BLOCKS 22
 #define WARP_SIZE 32
 
 // cpu settings
@@ -183,9 +183,6 @@ struct GPU_Data
     int* adjacencies;
 
     int* total_tasks;
-
-    bool* maximal_expansion;
-    bool* dumping_cliques;
 
     double* minimum_degree_ratio;
     int* minimum_degrees;
@@ -540,7 +537,7 @@ void search(CPU_Graph& hg, ofstream& temp_results)
         h_expand_level(hg, hd, hc);
     
         // if cliques is more than half full, flush to file
-        if (hc.cliques_offset[(*hc.cliques_count)] > CLIQUES_SIZE / 2) {
+        if (hc.cliques_offset[(*hc.cliques_count)] > (double)CLIQUES_SIZE / 2.0) {
             flush_cliques(hc, temp_results);
         }
 
@@ -566,34 +563,57 @@ void search(CPU_Graph& hg, ofstream& temp_results)
     cout << ">:BEGINNING EXPANSION" << endl;
     while (!(*hd.maximal_expansion))
     {
-        // reset loop variables
-        chkerr(cudaMemset(dd.maximal_expansion, true, sizeof(bool)));
-        chkerr(cudaMemset(dd.dumping_cliques, false, sizeof(bool)));
-        cudaDeviceSynchronize();
+        (*(hd.maximal_expansion)) = true;
 
         // expand all tasks in 'tasks' array, each warp will write to their respective warp tasks buffer in global memory
         d_expand_level<<<NUM_OF_BLOCKS, BLOCK_SIZE>>>(dd);
         cudaDeviceSynchronize();
+
+
 
         // DEBUG
         if (DEBUG_TOGGLE) {
             if (print_Warp_Data_Sizes_Every(dd, 1)) { break; }
         }
 
+
+
         // consolidate all the warp tasks/cliques buffers into the next global tasks array, buffer, and cliques
         transfer_buffers<<<NUM_OF_BLOCKS, BLOCK_SIZE>>>(dd);
         cudaDeviceSynchronize();
 
-        // if not enough tasks were generated when expanding the previous level to fill the next tasks array the program will attempt to fill the tasks array by popping tasks from the buffer
+
+
+        // determine whether maximal expansion has been accomplished
+        uint64_t current_level, write_count, buffer_count;
+        chkerr(cudaMemcpy(&current_level, dd.current_level, sizeof(uint64_t), cudaMemcpyDeviceToHost));
+        chkerr(cudaMemcpy(&buffer_count, dd.buffer_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
+        if (current_level % 2 == 0) {
+            chkerr(cudaMemcpy(&write_count, dd.tasks2_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
+        }
+        else {
+            chkerr(cudaMemcpy(&write_count, dd.tasks1_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
+        }
+
+        if (write_count > 0 || buffer_count > 0) {
+            (*(hd.maximal_expansion)) = false;
+        }
+
+
+
+         // if not enough tasks were generated when expanding the previous level to fill the next tasks array the program will attempt to fill the tasks array by popping tasks from the buffer
         fill_from_buffer<<<NUM_OF_BLOCKS, BLOCK_SIZE>>>(dd);
         cudaDeviceSynchronize();
 
-        // update the loop variables
-        chkerr(cudaMemcpy(hd.maximal_expansion, dd.maximal_expansion, sizeof(bool), cudaMemcpyDeviceToHost));
-        chkerr(cudaMemcpy(hd.dumping_cliques, dd.dumping_cliques, sizeof(bool), cudaMemcpyDeviceToHost));
+
+
+        // determine whether cliques has exceeded defined threshold, if so dump them to a file
+        uint64_t cliques_size, cliques_count;
+        chkerr(cudaMemcpy(&cliques_count, dd.cliques_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
+        chkerr(cudaMemcpy(&cliques_size, dd.cliques_offset + cliques_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
         cudaDeviceSynchronize();
 
-        if (*hd.dumping_cliques) {
+        if (cliques_size > (double)CLIQUES_SIZE / 2.0) {
             dump_cliques(hc, dd, temp_results);
         }
 
@@ -721,11 +741,6 @@ void allocate_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc, CPU_Graph& hg)
     chkerr(cudaMalloc((void**)&dd.lane_candidate_indegs, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
 
     chkerr(cudaMalloc((void**)&dd.adjacencies, (sizeof(int) * WVERTICES_SIZE) * number_of_warps));
-
-    chkerr(cudaMalloc((void**)&dd.maximal_expansion, sizeof(bool)));
-    chkerr(cudaMalloc((void**)&dd.dumping_cliques, sizeof(bool)));
-
-    chkerr(cudaMemset(dd.dumping_cliques, false, sizeof(bool)));
 
     chkerr(cudaMalloc((void**)&dd.minimum_degree_ratio, sizeof(double)));
     chkerr(cudaMalloc((void**)&dd.minimum_degrees, sizeof(int) * (hg.number_of_vertices + 1)));
@@ -1149,7 +1164,6 @@ void move_to_gpu(CPU_Data& hd, GPU_Data& dd)
     chkerr(cudaMemcpy(dd.buffer_offset, hd.buffer_offset, (BUFFER_OFFSET_SIZE) * sizeof(uint64_t), cudaMemcpyHostToDevice));
     chkerr(cudaMemcpy(dd.buffer_vertices, hd.buffer_vertices, (BUFFER_SIZE) * sizeof(int), cudaMemcpyHostToDevice));
 
-    chkerr(cudaMemcpy(dd.maximal_expansion, hd.maximal_expansion, sizeof(bool), cudaMemcpyHostToDevice));
     chkerr(cudaMemcpy(dd.current_level, hd.current_level, sizeof(uint64_t), cudaMemcpyHostToDevice));
 }
 
@@ -1248,9 +1262,6 @@ void free_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc)
     chkerr(cudaFree(dd.lane_candidate_indegs));
 
     chkerr(cudaFree(dd.adjacencies));
-
-    chkerr(cudaFree(dd.maximal_expansion));
-    chkerr(cudaFree(dd.dumping_cliques));
 
     chkerr(cudaFree(dd.minimum_degree_ratio));
     chkerr(cudaFree(dd.minimum_degrees));
@@ -3461,12 +3472,6 @@ __global__ void transfer_buffers(GPU_Data dd)
         (*(dd.total_tasks)) = 0;
         (*(dd.total_cliques)) = 0;
     }
-
-    // HANDLE CLIQUES
-    // only first thread for each 
-    if ((idx % WARP_SIZE) == 0 && cliques_write[wib_idx] > (CLIQUES_SIZE * ((double)CLIQUES_PERCENT / 100.0))) {
-        atomicExch((int*)dd.dumping_cliques, true);
-    }
 }
 
 __global__ void fill_from_buffer(GPU_Data dd)
@@ -3498,9 +3503,6 @@ __global__ void fill_from_buffer(GPU_Data dd)
     // FILL TASKS FROM BUFFER
     if ((*write_count) < EXPAND_THRESHOLD && (*(dd.buffer_count)) > 0)
     {
-        // CRITICAL
-        atomicExch((int*)dd.maximal_expansion, false);
-
         // get read and write locations
         int write_amount = ((*(dd.buffer_count)) >= (EXPAND_THRESHOLD - (*write_count))) ? EXPAND_THRESHOLD - (*write_count) : (*(dd.buffer_count));
         uint64_t start_buffer = dd.buffer_offset[(*(dd.buffer_count)) - write_amount];
@@ -4630,9 +4632,6 @@ __device__ void d_check_for_clique(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
 __device__ void d_write_to_tasks(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 {
-    // CRITICAL
-    atomicExch((int*)dd.maximal_expansion, false);
-
     uint64_t start_write = (WTASKS_SIZE * (ld.idx / WARP_SIZE)) + dd.wtasks_offset[WTASKS_OFFSET_SIZE * (ld.idx / WARP_SIZE) + (dd.wtasks_count[(ld.idx / WARP_SIZE)])];
 
     for (int k = (ld.idx % WARP_SIZE); k < wd.total_vertices[ld.wib_idx]; k += WARP_SIZE) {
