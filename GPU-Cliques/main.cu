@@ -19,28 +19,28 @@
 using namespace std;
 
 // global memory size: 1.500.000.000 ints
-#define TASKS_SIZE 100000000
-#define EXPAND_THRESHOLD 6048
-#define BUFFER_SIZE 1000000000
-#define BUFFER_OFFSET_SIZE 10000000
-#define CLIQUES_SIZE 100000000
-#define CLIQUES_OFFSET_SIZE 1000000
+#define TASKS_SIZE 1000000
+#define EXPAND_THRESHOLD 616
+#define BUFFER_SIZE 10000000
+#define BUFFER_OFFSET_SIZE 100000
+#define CLIQUES_SIZE 1000000
+#define CLIQUES_OFFSET_SIZE 10000
 #define CLIQUES_PERCENT 50
 
 // per warp
-#define WCLIQUES_SIZE 100000
-#define WCLIQUES_OFFSET_SIZE 10000
-#define WTASKS_SIZE 300000
-#define WTASKS_OFFSET_SIZE 10000
+#define WCLIQUES_SIZE 10000
+#define WCLIQUES_OFFSET_SIZE 1000
+#define WTASKS_SIZE 30000
+#define WTASKS_OFFSET_SIZE 1000
 // should be a multiple of 32 as to not waste space
-#define WVERTICES_SIZE 32000
+#define WVERTICES_SIZE 3200
 
 // shared memory size: 12.300 ints
 #define VERTICES_SIZE 80
  
 // threads info
 #define BLOCK_SIZE 896
-#define NUM_OF_BLOCKS 216
+#define NUM_OF_BLOCKS 22
 #define WARP_SIZE 32
 
 // cpu settings
@@ -381,9 +381,8 @@ __device__ void d_print_vertices(Vertex* vertices, int size);
 
 
 
-// DEBUG VARIBALES
-uint64_t max_tasks_s, max_buffer_s, max_buffer_o, max_cliques_s, max_cliques_o, num_vert, num_lvl1, num_lvl2, max_wtasks_s,
-         max_wtasks_o, max_wcliques_s, max_wcliques_o, max_vert;
+// MAX TRACKER VARIABLES
+uint64_t mts, mbs, mbo, mcs, mco, wts, wto, wcs, wco, mvs;
 
 // COMMAND LINE INPUT VARIABLES
 double minimum_degree_ratio;
@@ -397,6 +396,22 @@ int main(int argc, char* argv[])
 {
     // TIME
     auto start2 = std::chrono::high_resolution_clock::now();
+
+
+
+    // DEBUG
+    if (DEBUG_TOGGLE) {
+        mts = 0;
+        mbs = 0;
+        mbo = 0;
+        mcs = 0;
+        mco = 0;
+        wts = 0;
+        wto = 0;
+        wcs = 0;
+        wco = 0;
+        mvs = 0;
+    }
 
 
 
@@ -448,6 +463,24 @@ int main(int argc, char* argv[])
     search(hg, temp_results);
 
     temp_results.close();
+
+
+
+    // DEBUG
+    if (DEBUG_TOGGLE) {
+        cout << endl
+            << "TASKS SIZE: " << mts << endl
+            << "BUFFER SIZE: " << mbs << endl
+            << "BUFFER OFFSET SIZE: " << mbo << endl
+            << "CLIQUES SIZE: " << mcs << endl
+            << "CLIQUES OFFSET SIZE: " << mco << endl
+            << "WCLIQUES SIZE: " << wcs << endl
+            << "WCLIQUES OFFSET SIZE: " << wco << endl
+            << "WTASKS SIZE: " << wts << endl
+            << "WTASKS OFFSET SIZE: " << wto << endl
+            << "VERTICES SIZE: " << mvs << endl
+            << endl;
+    }
 
 
 
@@ -518,6 +551,7 @@ void search(CPU_Graph& hg, ofstream& temp_results)
 
     // DEBUG
     if (DEBUG_TOGGLE) {
+        mvs = (*(hd.tasks1_offset + (*hd.tasks1_count)));
         if ((*(hd.tasks1_offset + (*hd.tasks1_count))) > WVERTICES_SIZE) {
             cout << "!!! VERTICES SIZE ERROR !!!" << endl;
             return;
@@ -2873,6 +2907,19 @@ bool print_Warp_Data_Sizes(GPU_Data& dd)
 
     cout << "WTasks( TC: " << tasks_tcount << " TS: " << tasks_tsize << " MC: " << tasks_mcount << " MS: " << tasks_msize << ") WCliques ( TC: " << cliques_tcount << " TS: " << cliques_tsize << " MC: " << cliques_mcount << " MS: " << cliques_msize << ")" << endl;
 
+    if (tasks_mcount > wto) {
+        wto = tasks_mcount;
+    }
+    if (tasks_msize > wts) {
+        wts = tasks_msize;
+    }
+    if (cliques_mcount > wco) {
+        wco = cliques_mcount;
+    }
+    if (cliques_msize > wcs) {
+        wcs = cliques_msize;
+    }
+
     if (tasks_mcount > WTASKS_OFFSET_SIZE || tasks_msize > WTASKS_SIZE || cliques_mcount > WCLIQUES_OFFSET_SIZE || cliques_msize > WCLIQUES_SIZE) {
         cout << "!!! WBUFFER SIZE ERROR !!!" << endl;
         return true;
@@ -2989,9 +3036,26 @@ bool print_Data_Sizes(GPU_Data& dd)
     chkerr(cudaMemcpy(cliques_size, dd.cliques_offset + (*cliques_count), sizeof(uint64_t), cudaMemcpyDeviceToHost));
 
     cout << "L: " << (*current_level) << " T1: " << (*tasks1_count) << " " << (*tasks1_size) << " T2: " << (*tasks2_count) << " " << (*tasks2_size) << " B: " << (*buffer_count) << " " << (*buffer_size) << " C: " << 
-        (*cliques_count) << " " << (*cliques_size) << endl;
+        (*cliques_count) << " " << (*cliques_size) << endl << endl;
 
-    printf("\n");
+    if (*tasks1_size > mts) {
+        mts = *tasks1_size;
+    }
+    if (*tasks2_size > mts) {
+        mts = *tasks2_size;
+    }
+    if (*buffer_size > mbs) {
+        mbs = *buffer_size;
+    }
+    if (*buffer_count > mbo) {
+        mbo = *buffer_count;
+    }
+    if (*cliques_size > mcs) {
+        mcs = *cliques_size;
+    }
+    if (*cliques_count > mco) {
+        mco = *cliques_count;
+    }
 
     if ((*tasks1_count) > EXPAND_THRESHOLD || (*tasks1_size) > TASKS_SIZE || (*tasks2_count) > EXPAND_THRESHOLD || (*tasks2_size) > TASKS_SIZE || (*buffer_count) > BUFFER_OFFSET_SIZE || (*buffer_size) > BUFFER_SIZE || (*cliques_count) > CLIQUES_OFFSET_SIZE ||
         (*cliques_size) > CLIQUES_SIZE) {
