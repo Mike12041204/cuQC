@@ -20,10 +20,10 @@ using namespace std;
 
 // global memory size: 1.500.000.000 ints
 #define TASKS_SIZE 1000000
-#define EXPAND_THRESHOLD 176
+#define EXPAND_THRESHOLD 616
 #define BUFFER_SIZE 10000000
 #define BUFFER_OFFSET_SIZE 100000
-#define CLIQUES_SIZE 150000
+#define CLIQUES_SIZE 1000000
 #define CLIQUES_OFFSET_SIZE 10000
 #define CLIQUES_PERCENT 50
 
@@ -39,7 +39,7 @@ using namespace std;
 #define VERTICES_SIZE 80
  
 // threads info
-#define BLOCK_SIZE 256
+#define BLOCK_SIZE 896
 #define NUM_OF_BLOCKS 22
 #define WARP_SIZE 32
 
@@ -372,7 +372,6 @@ __device__ void d_print_vertices(Vertex* vertices, int size);
 
 // TODO (LOW PRIORITY)
 // - doesnt run when cpu et is greater than gpu et
-// - fill tasks kernel does not always need to launch can check outside of kernel to determine so
 // - only need to fill gpu tasks first round if cpu expand is less than gpu expand
 // - ensure no unecessary syncs on the gpu
 // - reevaluate and change where uint64_t's are used
