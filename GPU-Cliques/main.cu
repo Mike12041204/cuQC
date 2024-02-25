@@ -379,8 +379,6 @@ __device__ void d_print_vertices(Vertex* vertices, int size);
 // - label for vertices can be a byte rather than int
 // - dont need lvl2adj in all places anymore
 // - changing wtasks size causes unpredictable results
-// - dumping cliques causes seg fault, unimportant as this never happens unless cliques is tiny
-// - dumping cliques never happens
 
 
 
@@ -601,9 +599,16 @@ void search(CPU_Graph& hg, ofstream& temp_results)
 
 
 
-         // if not enough tasks were generated when expanding the previous level to fill the next tasks array the program will attempt to fill the tasks array by popping tasks from the buffer
-        fill_from_buffer<<<NUM_OF_BLOCKS, BLOCK_SIZE>>>(dd);
-        cudaDeviceSynchronize();
+        chkerr(cudaMemset(dd.wtasks_count, 0, sizeof(uint64_t) * ((NUM_OF_BLOCKS * BLOCK_SIZE) / WARP_SIZE)));
+        chkerr(cudaMemset(dd.wcliques_count, 0, sizeof(uint64_t) * ((NUM_OF_BLOCKS * BLOCK_SIZE) / WARP_SIZE)));
+        if (write_count < EXPAND_THRESHOLD && buffer_count > 0) {
+            // if not enough tasks were generated when expanding the previous level to fill the next tasks array the program will attempt to fill the tasks array by popping tasks from the buffer
+            fill_from_buffer<<<NUM_OF_BLOCKS, BLOCK_SIZE>>>(dd);
+            cudaDeviceSynchronize();
+        }
+        current_level++;
+        chkerr(cudaMemcpy(dd.current_level, &current_level, sizeof(uint64_t), cudaMemcpyHostToDevice));
+
 
 
 
