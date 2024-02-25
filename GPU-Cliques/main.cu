@@ -19,28 +19,28 @@
 using namespace std;
 
 // global memory size: 1.500.000.000 ints
-#define TASKS_SIZE 1000000
-#define EXPAND_THRESHOLD 616
-#define BUFFER_SIZE 10000000
-#define BUFFER_OFFSET_SIZE 100000
-#define CLIQUES_SIZE 1000000
-#define CLIQUES_OFFSET_SIZE 10000
+#define TASKS_SIZE 100000000
+#define EXPAND_THRESHOLD 6048
+#define BUFFER_SIZE 1000000000
+#define BUFFER_OFFSET_SIZE 10000000
+#define CLIQUES_SIZE 100000000
+#define CLIQUES_OFFSET_SIZE 1000000
 #define CLIQUES_PERCENT 50
 
 // per warp
-#define WCLIQUES_SIZE 10000
-#define WCLIQUES_OFFSET_SIZE 1000
-#define WTASKS_SIZE 30000
-#define WTASKS_OFFSET_SIZE 1000
+#define WCLIQUES_SIZE 100000
+#define WCLIQUES_OFFSET_SIZE 10000
+#define WTASKS_SIZE 300000
+#define WTASKS_OFFSET_SIZE 10000
 // should be a multiple of 32 as to not waste space
-#define WVERTICES_SIZE 3200
+#define WVERTICES_SIZE 32000
 
 // shared memory size: 12.300 ints
 #define VERTICES_SIZE 80
  
 // threads info
 #define BLOCK_SIZE 896
-#define NUM_OF_BLOCKS 22
+#define NUM_OF_BLOCKS 216
 #define WARP_SIZE 32
 
 // cpu settings
