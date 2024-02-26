@@ -3081,6 +3081,25 @@ void h_print_Data_Sizes(CPU_Data& hd, CPU_Cliques& hc)
     cout << "L: " << (*hd.current_level) << " T1: " << (*hd.tasks1_count) << " " << (*(hd.tasks1_offset + (*hd.tasks1_count))) << " T2: " << (*hd.tasks2_count) << " " << 
         (*(hd.tasks2_offset + (*hd.tasks2_count))) << " B: " << (*hd.buffer_count) << " " << (*(hd.buffer_offset + (*hd.buffer_count))) << " C: " << 
         (*hc.cliques_count) << " " << (*(hc.cliques_offset + (*hc.cliques_count))) << endl;
+
+    if ((*(hd.tasks1_offset + (*hd.tasks1_count))) > mts) {
+        mts = (*(hd.tasks1_offset + (*hd.tasks1_count)));
+    }
+    if ((*(hd.tasks2_offset + (*hd.tasks2_count))) > mts) {
+        mts = (*(hd.tasks2_offset + (*hd.tasks2_count)));
+    }
+    if ((*(hd.buffer_offset + (*hd.buffer_count))) > mbs) {
+        mbs = (*(hd.buffer_offset + (*hd.buffer_count)));
+    }
+    if ((*hd.buffer_count) > mbo) {
+        mbo = (*hd.buffer_count);
+    }
+    if ((*(hc.cliques_offset + (*hc.cliques_count))) > mcs) {
+        mcs = (*(hc.cliques_offset + (*hc.cliques_count)));
+    }
+    if ((*hc.cliques_count) > mco) {
+        mco = (*hc.cliques_count);
+    }
 }
 
 void print_WTask_Buffers(GPU_Data& dd)
