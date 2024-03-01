@@ -272,7 +272,7 @@ struct Warp_Data
     int sum_candidate_indeg[WARPS_PER_BLOCK];
 
     bool invalid_bounds[WARPS_PER_BLOCK];
-    bool failed_found[WARPS_PER_BLOCK];
+    bool success[WARPS_PER_BLOCK];
 
     int number_of_crit_adj[WARPS_PER_BLOCK];
 
@@ -3228,24 +3228,28 @@ __global__ void fill_from_buffer(GPU_Data dd)
 // --- DEVICE EXPANSION KERNELS ---
 
 // returns 1 if lookahead succesful, 0 otherwise 
-__device__ int d_lookahead_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld) 
+__device__ int d_lookahead_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 {
     bool lookahead_sucess;
     int pvertexid;
     int phelper1;
     int phelper2;
 
-    lookahead_sucess = true;
+    if (LANE_IDX == 0) {
+        wd.success[WIB_IDX] = true;
+    }
+    __syncwarp();
+
     // check if members meet degree requirement, dont need to check 2hop adj as diameter pruning guarentees all members will be within 2hops of eveything
-    for (int i = LANE_IDX; i < wd.num_mem[WIB_IDX]; i += WARP_SIZE) {
+    for (int i = LANE_IDX; i < wd.num_mem[WIB_IDX] && wd.success[WIB_IDX]; i += WARP_SIZE) {
         if (dd.read_vertices[wd.start[WIB_IDX] + i].indeg + dd.read_vertices[wd.start[WIB_IDX] + i].exdeg < dd.minimum_degrees[wd.tot_vert[WIB_IDX]]) {
-            lookahead_sucess = false;
+            wd.success[WIB_IDX] = false;
             break;
         }
     }
+    __syncwarp();
 
-    lookahead_sucess = !(__any_sync(0xFFFFFFFF, !lookahead_sucess));
-    if (!lookahead_sucess) {
+    if (!wd.success[WIB_IDX]) {
         return 0;
     }
 
@@ -3269,15 +3273,15 @@ __device__ int d_lookahead_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     __syncwarp();
 
     // compares all vertices to the lemmas from Quick
-    for (int j = wd.num_mem[WIB_IDX] + LANE_IDX; j < wd.tot_vert[WIB_IDX]; j += WARP_SIZE) {
+    for (int j = wd.num_mem[WIB_IDX] + LANE_IDX; j < wd.tot_vert[WIB_IDX] && wd.success[WIB_IDX]; j += WARP_SIZE) {
         if (dd.read_vertices[wd.start[WIB_IDX] + j].lvl2adj < wd.num_cand[WIB_IDX] - 1 || dd.read_vertices[wd.start[WIB_IDX] + j].indeg + dd.read_vertices[wd.start[WIB_IDX] + j].exdeg < dd.minimum_degrees[wd.tot_vert[WIB_IDX]]) {
-            lookahead_sucess = false;
+            wd.success[WIB_IDX] = false;
             break;
         }
     }
-    lookahead_sucess = !(__any_sync(0xFFFFFFFF, !lookahead_sucess));
+    __syncwarp();
 
-    if (lookahead_sucess) {
+    if (wd.success[WIB_IDX]) {
         // write to cliques
         uint64_t start_write = (WCLIQUES_SIZE * WARP_IDX) + dd.wcliques_offset[(WCLIQUES_OFFSET_SIZE * WARP_IDX) + (dd.wcliques_count[WARP_IDX])];
         for (int j = LANE_IDX; j < wd.tot_vert[WIB_IDX]; j += WARP_SIZE) {
@@ -3301,7 +3305,6 @@ __device__ int d_remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     int phelper2;
 
     int mindeg;
-    bool failed_found;
 
     mindeg = d_get_mindeg(wd.num_mem[WIB_IDX], dd);
 
@@ -3309,14 +3312,14 @@ __device__ int d_remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     if (LANE_IDX == 0) {
         wd.num_cand[WIB_IDX]--;
         wd.tot_vert[WIB_IDX]--;
+        wd.success[WIB_IDX] = false;
     }
     __syncwarp();
 
     // update info of vertices connected to removed cand
     pvertexid = dd.read_vertices[wd.start[WIB_IDX] + wd.tot_vert[WIB_IDX]].vertexid;
-    failed_found = false;
 
-    for (int i = LANE_IDX; i < wd.tot_vert[WIB_IDX]; i += WARP_SIZE) {
+    for (int i = LANE_IDX; i < wd.tot_vert[WIB_IDX] && !wd.success[WIB_IDX]; i += WARP_SIZE) {
         phelper1 = dd.read_vertices[wd.start[WIB_IDX] + i].vertexid;
         phelper2 = d_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[pvertexid], dd.onehop_offsets[pvertexid + 1] - dd.onehop_offsets[pvertexid], phelper1);
 
@@ -3324,14 +3327,14 @@ __device__ int d_remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
             dd.read_vertices[wd.start[WIB_IDX] + i].exdeg--;
 
             if (phelper1 < wd.num_mem[WIB_IDX] && dd.read_vertices[wd.start[WIB_IDX] + phelper1].indeg + dd.read_vertices[wd.start[WIB_IDX] + phelper1].exdeg < mindeg) {
-                failed_found = true;
+                wd.success[WIB_IDX] = true;
                 break;
             }
         }
     }
+    __syncwarp();
 
-    failed_found = __any_sync(0xFFFFFFFF, failed_found);
-    if (failed_found) {
+    if (wd.success[WIB_IDX]) {
         return 1;
     }
 
