@@ -18,42 +18,47 @@
 #include <device_atomic_functions.h>
 using namespace std;
 
-// global memory size: 1.500.000.000 ints
-#define TASKS_SIZE 100000000
-#define EXPAND_THRESHOLD 6048
-#define BUFFER_SIZE 1000000000
-#define BUFFER_OFFSET_SIZE 10000000
-#define CLIQUES_SIZE 100000000
-#define CLIQUES_OFFSET_SIZE 1000000
-#define CLIQUES_PERCENT 50
 
-// per warp
-#define WCLIQUES_SIZE 100000
-#define WCLIQUES_OFFSET_SIZE 10000
-#define WTASKS_SIZE 300000
-#define WTASKS_OFFSET_SIZE 10000
-// should be a multiple of 32 as to not waste space
-#define WVERTICES_SIZE 32000
 
-// shared memory size: 12.300 ints
-#define VERTICES_SIZE 80
- 
+// GPU KERNEL LAUNCH
 // threads info
 #define BLOCK_SIZE 896
 #define NUM_OF_BLOCKS 216
 #define WARP_SIZE 32
 
+// DATA STRUCTURE SIZE
+// global memory size: 1.500.000.000 ints
+#define TASKS_SIZE 1000000
+#define EXPAND_THRESHOLD 604800
+#define BUFFER_SIZE 10000000
+#define BUFFER_OFFSET_SIZE 100000
+#define CLIQUES_SIZE 1000000
+#define CLIQUES_OFFSET_SIZE 10000
+#define CLIQUES_PERCENT 50
+// per warp
+#define WCLIQUES_SIZE 10000
+#define WCLIQUES_OFFSET_SIZE 1000
+#define WTASKS_SIZE 30000
+#define WTASKS_OFFSET_SIZE 1000
+// should be a multiple of 32 as to not waste space
+#define WVERTICES_SIZE 3200
+// shared memory size: 12.300 ints
+#define VERTICES_SIZE 80
+ 
+// PROGRAM RUN SETTINGS
 // cpu settings
 #define CPU_LEVELS 1
 #define CPU_EXPAND_THRESHOLD 1
-
 // debug toggle
-#define DEBUG_TOGGLE 1
+#define DEBUG_TOGGLE 0
+
+
 
 // VERTEX DATA
 struct Vertex
 {
     int vertexid;
+    // labels: 0 -> candidate, 1 -> member, 2 -> covered vertex, 3 -> cover vertex, 4 -> critical adjacent vertex
     int label;
     int indeg;
     int exdeg;
@@ -269,7 +274,10 @@ struct Local_Data
     int wib_idx;
 };
 
+
+
 // METHODS
+// general
 void calculate_minimum_degrees(CPU_Graph& hg);
 void search(CPU_Graph& hg, ofstream& temp_results);
 void allocate_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc, CPU_Graph& hg);
@@ -280,6 +288,7 @@ void flush_cliques(CPU_Cliques& hc, ofstream& temp_results);
 void free_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc);
 void RemoveNonMax(char* szset_filename, char* szoutput_filename);
 
+// expansion
 void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc);
 int h_lookahead_pruning(CPU_Graph& hg, CPU_Cliques& hc, CPU_Data& hd, Vertex* read_vertices, int tot_vert, int num_mem, int num_cand, uint64_t start);
 int h_remove_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* read_vertices, int& tot_vert, int& num_cand, int& num_vert, uint64_t start);
@@ -287,30 +296,21 @@ int h_add_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_v
 void h_diameter_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int pvertexid, int& total_vertices, int& number_of_candidates, int number_of_members);
 bool h_degree_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_vertices, int& number_of_candidates, int number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg);
 bool h_calculate_LU_bounds(CPU_Data& hd, int& upper_bound, int& lower_bound, int& min_ext_deg, Vertex* vertices, int number_of_members, int number_of_candidates);
-void h_update_degrees(CPU_Graph& hg, Vertex* vertices, int total_vertices, int number_of_removed);
 void h_check_for_clique(CPU_Cliques& hc, Vertex* vertices, int number_of_members);
 int h_critical_vertex_pruning(CPU_Graph& hg, CPU_Data& hd, Vertex* vertices, int& total_vertices, int& number_of_candidates, int& number_of_members, int& upper_bound, int& lower_bound, int& min_ext_deg);
 void h_write_to_tasks(CPU_Data& hd, Vertex* vertices, int total_vertices, Vertex* write_vertices, uint64_t* write_offsets, uint64_t* write_count);
 void h_fill_from_buffer(CPU_Data& hd, Vertex* write_vertices, uint64_t* write_offsets, uint64_t* write_count, int threshold);
 
-bool h_calculate_LU_bounds_old(CPU_Data& hd, int& upper_bound, int& lower_bound, int& min_ext_deg, Vertex* vertices, int number_of_members, int number_of_candidates);
-
-int h_bsearch_array(int* search_array, int array_size, int search_number);
-int h_lsearch_vert(Vertex* search_array, int array_size, int search_vertexid);
-int h_sort_vert(const void* a, const void* b);
+// helper
 int h_sort_vert_cv(const void* a, const void* b);
 int h_sort_vert_Q(const void* a, const void* b);
-int h_sort_vert_LU(const void* a, const void* b);
-int h_sort_asce(const void* a, const void* b);
 int h_sort_desc(const void* a, const void* b);
 inline int h_get_mindeg(int clique_size);
-inline bool h_cand_isvalid(Vertex vertex, int clique_size);
 inline bool h_cand_isvalid_LU(Vertex vertex, int clique_size, int upper_bound, int lower_bound, int min_ext_deg);
-inline bool  h_vert_isextendable(Vertex vertex, int clique_size);
 inline bool  h_vert_isextendable_LU(Vertex vertex, int clique_size, int upper_bound, int lower_bound, int min_ext_deg);
 inline void chkerr(cudaError_t code);
 
-// DEBUG
+// debug
 void print_CPU_Data(CPU_Data& hd);
 void print_GPU_Data(GPU_Data& dd);
 void print_CPU_Graph(CPU_Graph& hg);
@@ -331,10 +331,15 @@ void print_debug(GPU_Data& dd);
 void print_idebug(GPU_Data& dd);
 void print_idebug(GPU_Data& dd);
 
+
+
 // KERNELS
+// general
 __global__ void d_expand_level(GPU_Data dd);
 __global__ void transfer_buffers(GPU_Data dd);
 __global__ void fill_from_buffer(GPU_Data dd);
+
+// expansion
 __device__ int d_lookahead_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
 __device__ int d_remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
 __device__ int d_add_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
@@ -343,26 +348,21 @@ __device__ void d_check_for_clique(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
 __device__ void d_write_to_tasks(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
 __device__ void d_diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, int pvertexid);
 __device__ void d_diameter_pruning_cv(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, int number_of_crit_adj);
-__device__ void d_update_degrees(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, int number_of_removed);
 __device__ void d_calculate_LU_bounds(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, int number_of_candidates);
 __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
 
+// helper
 __device__ void d_sort(Vertex* target, int size, int lane_idx, int (*func)(Vertex&, Vertex&));
 __device__ void d_sort_i(int* target, int size, int lane_idx, int (*func)(int, int));
 __device__ int d_sort_vert_Q(Vertex& v1, Vertex& v2);
 __device__ int d_sort_vert_cv(Vertex& v1, Vertex& v2);
 __device__ int d_sort_degs(int n1, int n2);
-__device__ int d_sort_vert_cp(Vertex& vertex1, Vertex& vertex2);
-__device__ int d_sort_vert_cc(Vertex& vertex1, Vertex& vertex2);
-__device__ int d_sort_vert_lu(Vertex& vertex1, Vertex& vertex2);
-__device__ int d_sort_vert_ex(Vertex& vertex1, Vertex& vertex2);
 __device__ int d_bsearch_array(int* search_array, int array_size, int search_number);
-__device__ bool d_cand_isvalid(Vertex& vertex, int number_of_members, GPU_Data& dd);
 __device__ bool d_cand_isvalid_LU(Vertex& vertex, GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
-__device__ bool d_vert_isextendable(Vertex& vertex, int number_of_members, GPU_Data& dd);
 __device__ bool d_vert_isextendable_LU(Vertex& vertex, GPU_Data& dd, Warp_Data& wd, Local_Data& ld);
 __device__ int d_get_mindeg(int number_of_members, GPU_Data& dd);
 
+// debug
 __device__ void d_print_vertices(Vertex* vertices, int size);
 
 
@@ -378,11 +378,14 @@ __device__ void d_print_vertices(Vertex* vertices, int size);
 // - label for vertices can be a byte rather than int
 // - dont need lvl2adj in all places anymore
 // - changing wtasks size causes unpredictable results
+// - ensure all sorts only check necessary conditions and only sort necessary areas
 
 
 
-// MAX TRACKER VARIABLES
+// DEBUG - MAX TRACKER VARIABLES
 uint64_t mts, mbs, mbo, mcs, mco, wts, wto, wcs, wco, mvs;
+
+
 
 // COMMAND LINE INPUT VARIABLES
 double minimum_degree_ratio;
@@ -1960,149 +1963,6 @@ bool h_calculate_LU_bounds(CPU_Data& hd, int& upper_bound, int& lower_bound, int
     return invalid_bounds;
 }
 
-bool h_calculate_LU_bounds_old(CPU_Data& hd, int& upper_bound, int& lower_bound, int& min_ext_deg, Vertex* vertices, int number_of_members, int number_of_candidates)
-{
-    bool invalid_bounds = false;
-    int index;
-
-    int sum_candidate_indeg = 0;
-    int tightened_upper_bound = 0;
-
-    int min_clq_indeg = vertices[0].indeg;
-    int min_indeg_exdeg = vertices[0].exdeg;
-    int min_clq_totaldeg = vertices[0].indeg + vertices[0].exdeg;
-    int sum_clq_indeg = vertices[0].indeg;
-
-    for (index = 1; index < number_of_members; index++) {
-        sum_clq_indeg += vertices[index].indeg;
-
-        if (vertices[index].indeg < min_clq_indeg) {
-            min_clq_indeg = vertices[index].indeg;
-            min_indeg_exdeg = vertices[index].exdeg;
-        }
-        else if (vertices[index].indeg == min_clq_indeg) {
-            if (vertices[index].exdeg < min_indeg_exdeg) {
-                min_indeg_exdeg = vertices[index].exdeg;
-            }
-        }
-
-        if (vertices[index].indeg + vertices[index].exdeg < min_clq_totaldeg) {
-            min_clq_totaldeg = vertices[index].indeg + vertices[index].exdeg;
-        }
-    }
-
-    min_ext_deg = h_get_mindeg(number_of_members + 1);
-
-    if (min_clq_indeg < minimum_degrees[number_of_members])
-    {
-        // lower
-        lower_bound = h_get_mindeg(number_of_members) - min_clq_indeg;
-
-        while (lower_bound <= min_indeg_exdeg && min_clq_indeg + lower_bound < minimum_degrees[number_of_members + lower_bound]) {
-            lower_bound++;
-        }
-
-        if (min_clq_indeg + lower_bound < minimum_degrees[number_of_members + lower_bound]) {
-            lower_bound = number_of_candidates + 1;
-            invalid_bounds = true;
-        }
-
-        // upper
-        upper_bound = floor(min_clq_totaldeg / minimum_degree_ratio) + 1 - number_of_members;
-
-        if (upper_bound > number_of_candidates) {
-            upper_bound = number_of_candidates;
-        }
-
-        // tighten
-        if (lower_bound < upper_bound) {
-            // tighten lower
-            for (index = 0; index < lower_bound; index++) {
-                sum_candidate_indeg += vertices[number_of_members + index].indeg;
-            }
-
-            while (index < upper_bound && sum_clq_indeg + sum_candidate_indeg < number_of_members * minimum_degrees[number_of_members + index]) {
-                sum_candidate_indeg += vertices[number_of_members + index].indeg;
-                index++;
-            }
-
-            if (sum_clq_indeg + sum_candidate_indeg < number_of_members * minimum_degrees[number_of_members + index]) {
-                lower_bound = upper_bound + 1;
-                invalid_bounds = true;
-            }
-            else {
-                lower_bound = index;
-
-                tightened_upper_bound = index;
-
-                while (index < upper_bound) {
-                    sum_candidate_indeg += vertices[number_of_members + index].indeg;
-
-                    index++;
-
-                    if (sum_clq_indeg + sum_candidate_indeg >= number_of_members * minimum_degrees[number_of_members + index]) {
-                        tightened_upper_bound = index;
-                    }
-                }
-
-                if (upper_bound > tightened_upper_bound) {
-                    upper_bound = tightened_upper_bound;
-                }
-
-                if (lower_bound > 1) {
-                    min_ext_deg = h_get_mindeg(number_of_members + lower_bound);
-                }
-            }
-        }
-    }
-    else {
-        upper_bound = number_of_candidates;
-
-        if (number_of_members < minimum_clique_size) {
-            lower_bound = minimum_clique_size - number_of_members;
-        }
-        else {
-            lower_bound = 0;
-        }
-    }
-
-    if (number_of_members + upper_bound < minimum_clique_size) {
-        invalid_bounds = true;
-    }
-
-    if (upper_bound < 0 || upper_bound < lower_bound) {
-        invalid_bounds = true;
-    }
-
-    return invalid_bounds;
-}
-
-void h_update_degrees(CPU_Graph& hg, Vertex* vertices, int total_vertices, int number_of_removed)
-{
-    // intersection
-    int pvertexid;
-    uint64_t pneighbors_start;
-    uint64_t pneighbors_end;
-    int pneighbors_count;
-    int phelper1;
-    int phelper2;
-
-    // update exdeg of vertices connected to removed cands
-    for (int i = 0; i < total_vertices - number_of_removed; i++) {
-        pvertexid = vertices[i].vertexid;
-        for (int j = total_vertices - number_of_removed; j < total_vertices; j++) {
-            phelper1 = vertices[j].vertexid;
-            pneighbors_start = hg.onehop_offsets[phelper1];
-            pneighbors_end = hg.onehop_offsets[phelper1 + 1];
-            pneighbors_count = pneighbors_end - pneighbors_start;
-            phelper2 = h_bsearch_array(hg.onehop_neighbors + pneighbors_start, pneighbors_count, pvertexid);
-            if (phelper2 != -1) {
-                vertices[i].exdeg--;
-            }
-        }
-    }
-}
-
 void h_check_for_clique(CPU_Cliques& hc, Vertex* vertices, int number_of_members)
 {
     bool clique = true;
@@ -2187,116 +2047,6 @@ void h_fill_from_buffer(CPU_Data& hd, Vertex* write_vertices, uint64_t* write_of
 
 // --- HELPER METHODS ---
 
-// searches an int array for a certain int, returns the position in the array that item was found, or -1 if not found
-int h_bsearch_array(int* search_array, int array_size, int search_number)
-{
-    // ALGO - binary
-    // TYPE - serial
-    // SPEED - 0(log(n))
-
-    int low = 0;
-    int high = array_size - 1;
-
-    while (low <= high) {
-        int mid = (low + high) / 2;
-
-        if (search_array[mid] == search_number) {
-            return mid;
-        }
-        else if (search_array[mid] > search_number) {
-            high = mid - 1;
-        }
-        else {
-            low = mid + 1;
-        }
-    }
-
-    return -1;
-}
-
-int h_lsearch_vert(Vertex* search_array, int array_size, int search_vertexid) {
-    for (int i = 0; i < array_size; i++) {
-        if (search_array[i].vertexid == search_vertexid) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-int h_sort_vert(const void* a, const void* b)
-{
-    // order is: in clique -> covered -> critical adj vertices -> cands -> cover -> pruned
-
-    // in clique
-    if ((*(Vertex*)a).label == 1 && (*(Vertex*)b).label != 1) {
-        return -1;
-    }
-    else if ((*(Vertex*)a).label != 1 && (*(Vertex*)b).label == 1) {
-        return 1;
-
-        // covered candidate vertices
-    }
-    else if ((*(Vertex*)a).label == 2 && (*(Vertex*)b).label != 2) {
-        return -1;
-    }
-    else if ((*(Vertex*)a).label != 2 && (*(Vertex*)b).label == 2) {
-        return 1;
-
-        // critical adjacent candidate vertices
-    }
-    else if ((*(Vertex*)a).label == 4 && (*(Vertex*)b).label != 4) {
-        return -1;
-    }
-    else if ((*(Vertex*)a).label != 4 && (*(Vertex*)b).label == 4) {
-        return 1;
-
-        // candidate vertices
-    }
-    else if ((*(Vertex*)a).label == 0 && (*(Vertex*)b).label != 0) {
-        return -1;
-    }
-    else if ((*(Vertex*)a).label != 0 && (*(Vertex*)b).label == 0) {
-        return 1;
-
-        // the cover vertex
-    }
-    else if ((*(Vertex*)a).label == 3 && (*(Vertex*)b).label != 3) {
-        return -1;
-    }
-    else if ((*(Vertex*)a).label != 3 && (*(Vertex*)b).label == 3) {
-        return 1;
-
-        // vertices that have been pruned
-    }
-    else if ((*(Vertex*)a).label == -1 && (*(Vertex*)b).label != 1) {
-        return 1;
-    }
-    else if ((*(Vertex*)a).label != -1 && (*(Vertex*)b).label == -1) {
-        return -1;
-    }
-
-    // for ties: in cand low -> high
-
-    else if ((*(Vertex*)a).label == 0 && (*(Vertex*)b).label == 0) {
-        if ((*(Vertex*)a).vertexid > (*(Vertex*)b).vertexid) {
-            return 1;
-        }
-        else if ((*(Vertex*)a).vertexid < (*(Vertex*)b).vertexid) {
-            return -1;
-        }
-        else {
-            return 0;
-        }
-    }
-    else if ((*(Vertex*)a).label == 2 && (*(Vertex*)b).label == 2) {
-        return 0;
-    }
-    else if ((*(Vertex*)a).label == -1 && (*(Vertex*)b).label == -1) {
-        return 0;
-    }
-    return 0;
-}
-
 // update how this method looks
 int h_sort_vert_Q(const void* a, const void* b)
 {
@@ -2363,90 +2113,6 @@ int h_sort_vert_cv(const void* a, const void* b)
         return 0;
 }
 
-int h_sort_vert_LU(const void* a, const void* b)
-{
-    // order is: in clique -> covered -> crtical adjacent -> cands -> cover -> pruned
-
-    // in clique
-    if ((*(Vertex*)a).label == 1 && (*(Vertex*)b).label != 1) {
-        return -1;
-    }
-    else if ((*(Vertex*)a).label != 1 && (*(Vertex*)b).label == 1) {
-        return 1;
-
-        // covered candidate vertices
-    }
-    else if ((*(Vertex*)a).label == 2 && (*(Vertex*)b).label != 2) {
-        return -1;
-    }
-    else if ((*(Vertex*)a).label != 2 && (*(Vertex*)b).label == 2) {
-        return 1;
-
-        // critical adjacent candidate vertices
-    }
-    else if ((*(Vertex*)a).label == 4 && (*(Vertex*)b).label != 4) {
-        return -1;
-    }
-    else if ((*(Vertex*)a).label != 4 && (*(Vertex*)b).label == 4) {
-        return 1;
-
-        // candidate vertices
-    }
-    else if ((*(Vertex*)a).label == 0 && (*(Vertex*)b).label != 0) {
-        return -1;
-    }
-    else if ((*(Vertex*)a).label != 0 && (*(Vertex*)b).label == 0) {
-        return 1;
-
-        // the cover vertex
-    }
-    else if ((*(Vertex*)a).label == 3 && (*(Vertex*)b).label != 3) {
-        return -1;
-    }
-    else if ((*(Vertex*)a).label != 3 && (*(Vertex*)b).label == 3) {
-        return 1;
-
-        // vertices that have been pruned
-    }
-    else if ((*(Vertex*)a).label == -1 && (*(Vertex*)b).label != 1) {
-        return 1;
-    }
-    else if ((*(Vertex*)a).label != -1 && (*(Vertex*)b).label == -1) {
-        return -1;
-    }
-
-    // for ties: in clique low -> high, cand high indeg -> low indeg
-    else if ((*(Vertex*)a).label == 1 && (*(Vertex*)b).label == 1) {
-        if ((*(Vertex*)a).vertexid > (*(Vertex*)b).vertexid) {
-            return 1;
-        }
-        else if ((*(Vertex*)a).vertexid < (*(Vertex*)b).vertexid) {
-            return -1;
-        }
-        else {
-            return 0;
-        }
-    }
-    else if ((*(Vertex*)a).label == 0 && (*(Vertex*)b).label == 0) {
-        if ((*(Vertex*)a).indeg > (*(Vertex*)b).indeg) {
-            return -1;
-        }
-        else if ((*(Vertex*)a).indeg < (*(Vertex*)b).indeg) {
-            return 1;
-        }
-        else {
-            return 0;
-        }
-    }
-    else if ((*(Vertex*)a).label == 2 && (*(Vertex*)b).label == 2) {
-        return 0;
-    }
-    else if ((*(Vertex*)a).label == -1 && (*(Vertex*)b).label == -1) {
-        return 0;
-    }
-    return 0;
-}
-
 // sorts degrees in descending order
 int h_sort_desc(const void* a, const void* b) 
 {
@@ -2467,44 +2133,12 @@ int h_sort_desc(const void* a, const void* b)
     }
 }
 
-// sorts degrees in ascending order
-int h_sort_asce(const void* a, const void* b)
-{
-    int n1;
-    int n2;
-
-    n1 = *(int*)a;
-    n2 = *(int*)b;
-
-    if (n1 < n2) {
-        return -1;
-    }
-    else if (n1 > n2) {
-        return 1;
-    }
-    else {
-        return 0;
-    }
-}
-
 inline int h_get_mindeg(int clique_size) {
     if (clique_size < minimum_clique_size) {
         return minimum_degrees[minimum_clique_size];
     }
     else {
         return minimum_degrees[clique_size];
-    }
-}
-
-inline bool h_cand_isvalid(Vertex vertex, int clique_size) {
-    if (vertex.indeg + vertex.exdeg < minimum_degrees[minimum_clique_size]) {
-        return false;
-    }
-    else if (vertex.indeg + vertex.exdeg < h_get_mindeg(clique_size + vertex.exdeg + 1)) {
-        return false;
-    }
-    else {
-        return true;
     }
 }
 
@@ -2530,18 +2164,6 @@ inline bool h_cand_isvalid_LU(Vertex vertex, int clique_size, int upper_bound, i
     }
 }
 
-inline bool h_vert_isextendable(Vertex vertex, int clique_size) 
-{
-    if (vertex.indeg + vertex.exdeg < minimum_degrees[minimum_clique_size]) {
-        return false;
-    }
-    else if (vertex.indeg + vertex.exdeg < h_get_mindeg(clique_size + vertex.exdeg)) {
-        return false;
-    }
-    else {
-        return true;
-    }
-}
 
 inline bool h_vert_isextendable_LU(Vertex vertex, int clique_size, int upper_bound, int lower_bound, int min_ext_deg)
 {
@@ -4674,22 +4296,6 @@ __device__ void d_calculate_LU_bounds(GPU_Data& dd, Warp_Data& wd, Local_Data& l
     __syncwarp();
 }
 
-// program updates degrees by : for each vertex, for each removed vertex, binary search neighbors of removed vertex for vertex
-__device__ void d_update_degrees(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, int number_of_removed)
-{
-    int pvertexid;
-
-    for (int k = (ld.idx % WARP_SIZE); k < wd.total_vertices[ld.wib_idx] - number_of_removed; k += WARP_SIZE) {
-        pvertexid = ld.vertices[k].vertexid;
-        for (int l = wd.total_vertices[ld.wib_idx] - number_of_removed; l < wd.total_vertices[ld.wib_idx]; l++) {
-            if (d_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[ld.vertices[l].vertexid], dd.onehop_offsets[ld.vertices[l].vertexid + 1] - dd.onehop_offsets[ld.vertices[l].vertexid], pvertexid) != -1) {
-                ld.vertices[k].exdeg--;
-            }
-        }
-    }
-    __syncwarp();
-}
-
 __device__ void d_check_for_clique(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 {
     bool clique = true;
@@ -4884,209 +4490,6 @@ __device__ int d_sort_degs(int n1, int n2)
     }
 }
 
-// sort vetices only considering in clique, candidates, and pruned vertices
-__device__ int d_sort_vert_cp(Vertex& vertex1, Vertex& vertex2)
-{
-    // order is: cands -> pruned
-
-    if (vertex1.label == 0 && vertex2.label != 0) {
-        return -1;
-    }
-    else if (vertex1.label != 0 && vertex2.label == 0) {
-        return 1;
-    }
-    else {
-        return 0;
-    }
-}
-
-// sort vertices only considering in clique and candidates
-__device__ int d_sort_vert_cc(Vertex& vertex1, Vertex& vertex2)
-{
-    // order is: in clique -> cands
-
-    // in clique
-    if (vertex1.label == 1 && vertex2.label != 1) {
-        return -1;
-    }
-    else if (vertex1.label != 1 && vertex2.label == 1) {
-        return 1;
-    }
-    else {
-        return 0;
-    }
-}
-
-// sort vertices with cands sorted from high indeg to low indeg
-__device__ int d_sort_vert_lu(Vertex& vertex1, Vertex& vertex2)
-{
-    // order is: in clique -> covered -> crtical adjacent -> cands -> cover -> pruned
-
-    // in clique
-    if (vertex1.label == 1 && vertex2.label != 1) {
-        return -1;
-    }
-    else if (vertex1.label != 1 && vertex2.label == 1) {
-        return 1;
-
-        // covered candidate vertices
-    }
-    else if (vertex1.label == 2 && vertex2.label != 2) {
-        return -1;
-    }
-    else if (vertex1.label != 2 && vertex2.label == 2) {
-        return 1;
-
-        // critical adjacent candidate vertices
-    }
-    else if (vertex1.label == 4 && vertex2.label != 4) {
-        return -1;
-    }
-    else if (vertex1.label != 4 && vertex2.label == 4) {
-        return 1;
-
-        // candidate vertices
-    }
-    else if (vertex1.label == 0 && vertex2.label != 0) {
-        return -1;
-    }
-    else if (vertex1.label != 0 && vertex2.label == 0) {
-        return 1;
-
-        // the cover vertex
-    }
-    else if (vertex1.label == 3 && vertex2.label != 3) {
-        return -1;
-    }
-    else if (vertex1.label != 3 && vertex2.label == 3) {
-        return 1;
-
-        // vertices that have been pruned
-    }
-    else if (vertex1.label == -1 && vertex2.label != 1) {
-        return 1;
-    }
-    else if (vertex1.label != -1 && vertex2.label == -1) {
-        return -1;
-    }
-
-    // for ties: in clique low -> high, cand high indeg -> low indeg
-    else if (vertex1.label == 1 && vertex2.label == 1) {
-        if (vertex1.vertexid > vertex2.vertexid) {
-            return 1;
-        }
-        else if (vertex1.vertexid < vertex2.vertexid) {
-            return -1;
-        }
-        else {
-            return 0;
-        }
-    }
-    else if (vertex1.label == 0 && vertex2.label == 0) {
-        if (vertex1.indeg > vertex2.indeg) {
-            return -1;
-        }
-        else if (vertex1.indeg < vertex2.indeg) {
-            return 1;
-        }
-        else {
-            return 0;
-        }
-    }
-    else if (vertex1.label == 2 && vertex2.label == 2) {
-        return 0;
-    }
-    else if (vertex1.label == -1 && vertex2.label == -1) {
-        return 0;
-    }
-    return 0;
-}
-
-// sort vertices with cands sorted from high idx to low idx
-__device__ int d_sort_vert_ex(Vertex& vertex1, Vertex& vertex2)
-{
-    // order is: in clique -> covered -> critical adj vertices -> cands -> cover -> pruned
-
-    // in clique
-    if (vertex1.label == 1 && vertex2.label != 1) {
-        return -1;
-    }
-    else if (vertex1.label != 1 && vertex2.label == 1) {
-        return 1;
-
-        // covered candidate vertices
-    }
-    else if (vertex1.label == 2 && vertex2.label != 2) {
-        return -1;
-    }
-    else if (vertex1.label != 2 && vertex2.label == 2) {
-        return 1;
-
-        // critical adjacent candidate vertices
-    }
-    else if (vertex1.label == 4 && vertex2.label != 4) {
-        return -1;
-    }
-    else if (vertex1.label != 4 && vertex2.label == 4) {
-        return 1;
-
-        // candidate vertices
-    }
-    else if (vertex1.label == 0 && vertex2.label != 0) {
-        return -1;
-    }
-    else if (vertex1.label != 0 && vertex2.label == 0) {
-        return 1;
-
-        // the cover vertex
-    }
-    else if (vertex1.label == 3 && vertex2.label != 3) {
-        return -1;
-    }
-    else if (vertex1.label != 3 && vertex2.label == 3) {
-        return 1;
-
-        // vertices that have been pruned
-    }
-    else if (vertex1.label == -1 && vertex2.label != 1) {
-        return 1;
-    }
-    else if (vertex1.label != -1 && vertex2.label == -1) {
-        return -1;
-    }
-
-    // for ties: in clique low -> high, cand high -> low
-    else if (vertex1.label == 1 && vertex2.label == 1) {
-        if (vertex1.vertexid > vertex2.vertexid) {
-            return 1;
-        }
-        else if (vertex1.vertexid < vertex2.vertexid) {
-            return -1;
-        }
-        else {
-            return 0;
-        }
-    }
-    else if (vertex1.label == 0 && vertex2.label == 0) {
-        if (vertex1.vertexid > vertex2.vertexid) {
-            return 1;
-        }
-        else if (vertex1.vertexid < vertex2.vertexid) {
-            return -1;
-        }
-        else {
-            return 0;
-        }
-    }
-    else if (vertex1.label == 2 && vertex2.label == 2) {
-        return 0;
-    }
-    else if (vertex1.label == -1 && vertex2.label == -1) {
-        return 0;
-    }
-    return 0;
-}
-
 __device__ int d_get_mindeg(int number_of_members, GPU_Data& dd)
 {
     if (number_of_members < (*(dd.minimum_clique_size))) {
@@ -5094,19 +4497,6 @@ __device__ int d_get_mindeg(int number_of_members, GPU_Data& dd)
     }
     else {
         return dd.minimum_degrees[number_of_members];
-    }
-}
-
-__device__ bool d_cand_isvalid(Vertex& vertex, int number_of_members, GPU_Data& dd)
-{
-    if (vertex.indeg + vertex.exdeg < dd.minimum_degrees[(*(dd.minimum_clique_size))]) {
-        return false;
-    }
-    else if (vertex.indeg + vertex.exdeg < d_get_mindeg(number_of_members + vertex.exdeg + 1, dd)) {
-        return false;
-    }
-    else {
-        return true;
     }
 }
 
@@ -5125,19 +4515,6 @@ __device__ bool d_cand_isvalid_LU(Vertex& vertex, GPU_Data& dd, Warp_Data& wd, L
         return false;
     }
     else if (vertex.indeg + vertex.exdeg < d_get_mindeg(wd.number_of_members[ld.wib_idx] + wd.lower_bound[ld.wib_idx], dd)) {
-        return false;
-    }
-    else {
-        return true;
-    }
-}
-
-__device__ bool d_vert_isextendable(Vertex& vertex, int number_of_members, GPU_Data& dd)
-{
-    if (vertex.indeg + vertex.exdeg < dd.minimum_degrees[(*(dd.minimum_clique_size))]) {
-        return false;
-    }
-    else if (vertex.indeg + vertex.exdeg < d_get_mindeg(number_of_members + vertex.exdeg, dd)) {
         return false;
     }
     else {

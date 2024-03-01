@@ -30,3 +30,12 @@
      
 11 - SERIALIZED GRAPH READING - Our program reads grpahs in a serialized format were each line of the file directly represents a variable or array which we need from the
      graph, in this way we can prevent full pre-processing each time by directly storing information such as the twohop adjacencies of every vertex.
+
+--- REMOVED VARIABLES ---
+
+int idx = (blockIdx.x * blockDim.x + threadIdx.x);
+
+int warp_idx = (idx / WARP_SIZE);
+int lane_idx = (idx % WARP_SIZE);
+const int warps_per_block = (BLOCK_SIZE / WARP_SIZE);
+int warp_in_block_idx = ((idx / WARP_SIZE) % (BLOCK_SIZE / WARP_SIZE));
