@@ -388,6 +388,8 @@ __device__ void d_print_vertices(Vertex* vertices, int size);
 // - reevaluate and change where uint64_t's are used
 // - label for vertices can be a byte rather than int
 // - dont need lvl2adj in all places anymore
+// - look for places where we can break early
+// - improve d_degree_pruning
 
 
 
@@ -3633,6 +3635,8 @@ __device__ void d_diameter_pruning_cv(GPU_Data& dd, Warp_Data& wd, Local_Data& l
 }
 
 // TODO - check for extra syncs
+// TODO - remove duplicated code
+// TODO - remove return and just use wd.success
 // returns true if invalid bounds or failed found
 __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 {
