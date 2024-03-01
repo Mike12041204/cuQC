@@ -57,7 +57,7 @@ using namespace std;
 #define CPU_LEVELS 1
 #define CPU_EXPAND_THRESHOLD 1
 // debug toggle
-#define DEBUG_TOGGLE 0
+#define DEBUG_TOGGLE 1
 
 
 
