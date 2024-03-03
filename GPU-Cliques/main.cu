@@ -35,20 +35,20 @@ using namespace std;
 #define NUMBER_OF_THREADS (NUM_OF_BLOCKS * BLOCK_SIZE)
 
 // DATA STRUCTURE SIZE
-#define TASKS_SIZE 100000000
+#define TASKS_SIZE 1000000
 #define TASKS_PER_WARP 100
-#define BUFFER_SIZE 1000000000
-#define BUFFER_OFFSET_SIZE 10000000
-#define CLIQUES_SIZE 100000000
-#define CLIQUES_OFFSET_SIZE 1000000
+#define BUFFER_SIZE 10000000
+#define BUFFER_OFFSET_SIZE 100000
+#define CLIQUES_SIZE 1000000
+#define CLIQUES_OFFSET_SIZE 10000
 #define CLIQUES_PERCENT 100
 // per warp
-#define WCLIQUES_SIZE 100000
-#define WCLIQUES_OFFSET_SIZE 10000
-#define WTASKS_SIZE 300000
-#define WTASKS_OFFSET_SIZE 10000
+#define WCLIQUES_SIZE 10000
+#define WCLIQUES_OFFSET_SIZE 1000
+#define WTASKS_SIZE 30000
+#define WTASKS_OFFSET_SIZE 1000
 // global memory vertices, should be a multiple of 32 as to not waste space
-#define WVERTICES_SIZE 32000
+#define WVERTICES_SIZE 3200
 // shared memory vertices
 #define VERTICES_SIZE 70
 
@@ -276,12 +276,17 @@ struct Warp_Data
     int sum_clq_indeg[WARPS_PER_BLOCK];
     int sum_candidate_indeg[WARPS_PER_BLOCK];
 
+    // try to combine
     bool invalid_bounds[WARPS_PER_BLOCK];
     bool success[WARPS_PER_BLOCK];
 
     int number_of_crit_adj[WARPS_PER_BLOCK];
 
+    // not used
     Vertex* vertices[WARPS_PER_BLOCK];
+
+    // for dynamic intersection
+    int count[WARPS_PER_BLOCK];
 };
 
 // LOCAL DATA
@@ -3332,7 +3337,6 @@ __device__ int d_lookahead_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     }
     __syncwarp();
 
-    int local_wi, local_wcc, local_wco;
     if (wd.success[WIB_IDX]) {
         // write to cliques
         uint64_t start_write = (WCLIQUES_SIZE * WARP_IDX) + dd.wcliques_offset[(WCLIQUES_OFFSET_SIZE * WARP_IDX) + (dd.wcliques_count[WARP_IDX])];
