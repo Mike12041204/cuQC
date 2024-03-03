@@ -22,7 +22,7 @@ using namespace std;
 
 // GPU KERNEL LAUNCH
 #define BLOCK_SIZE 1024
-#define NUM_OF_BLOCKS 216
+#define NUM_OF_BLOCKS 22
 #define WARP_SIZE 32
 
 // GPU INFORMATION
@@ -36,7 +36,7 @@ using namespace std;
 
 // DATA STRUCTURE SIZE
 #define TASKS_SIZE 100000000
-#define EXPAND_THRESHOLD (1 * NUMBER_OF_WARPS)
+#define TASKS_PER_WARP 100
 #define BUFFER_SIZE 1000000000
 #define BUFFER_OFFSET_SIZE 10000000
 #define CLIQUES_SIZE 100000000
@@ -51,13 +51,15 @@ using namespace std;
 #define WVERTICES_SIZE 32000
 // shared memory vertices
 #define VERTICES_SIZE 70
+
+#define EXPAND_THRESHOLD (TASKS_PER_WARP * NUMBER_OF_WARPS)
  
 // PROGRAM RUN SETTINGS
 // cpu settings
 #define CPU_LEVELS 1
 #define CPU_EXPAND_THRESHOLD 1
 // debug toggle
-#define DEBUG_TOGGLE 1
+#define DEBUG_TOGGLE 0
 
 
 
@@ -237,6 +239,9 @@ struct GPU_Data
     uint64_t* write_count;
     uint64_t* write_offsets;
     Vertex* write_vertices;
+
+    // task scheduling
+    int* current_task;
 };
 
 // WARP DATA
@@ -341,6 +346,8 @@ void print_All_Warp_Data_Sizes_Every(GPU_Data& dd, int every);
 void print_debug(GPU_Data& dd);
 void print_idebug(GPU_Data& dd);
 void print_idebug(GPU_Data& dd);
+void initialize_maxes();
+void print_maxes();
 
 
 
@@ -415,16 +422,7 @@ int main(int argc, char* argv[])
 
     // DEBUG
     if (DEBUG_TOGGLE) {
-        mts = 0;
-        mbs = 0;
-        mbo = 0;
-        mcs = 0;
-        mco = 0;
-        wts = 0;
-        wto = 0;
-        wcs = 0;
-        wco = 0;
-        mvs = 0;
+        initialize_maxes();
     }
 
 
@@ -482,18 +480,7 @@ int main(int argc, char* argv[])
 
     // DEBUG
     if (DEBUG_TOGGLE) {
-        cout << endl
-            << "TASKS SIZE: " << mts << endl
-            << "BUFFER SIZE: " << mbs << endl
-            << "BUFFER OFFSET SIZE: " << mbo << endl
-            << "CLIQUES SIZE: " << mcs << endl
-            << "CLIQUES OFFSET SIZE: " << mco << endl
-            << "WCLIQUES SIZE: " << wcs << endl
-            << "WCLIQUES OFFSET SIZE: " << wco << endl
-            << "WTASKS SIZE: " << wts << endl
-            << "WTASKS OFFSET SIZE: " << wto << endl
-            << "VERTICES SIZE: " << mvs << endl
-            << endl;
+        print_maxes();
     }
 
 
@@ -609,6 +596,8 @@ void search(CPU_Graph& hg, ofstream& temp_results)
     while (!(*hd.maximal_expansion))
     {
         (*(hd.maximal_expansion)) = true;
+        chkerr(cudaMemset(dd.current_task, 0, sizeof(int)));
+        cudaDeviceSynchronize();
 
         // expand all tasks in 'tasks' array, each warp will write to their respective warp tasks buffer in global memory
         d_expand_level<<<NUM_OF_BLOCKS, BLOCK_SIZE>>>(dd);
@@ -842,6 +831,9 @@ void allocate_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc, CPU_Graph& hg)
 
     chkerr(cudaMemset(dd.debug, false, sizeof(bool)));
     chkerr(cudaMemset(dd.idebug, 0, sizeof(int)));
+
+    // task scheduling
+    chkerr(cudaMalloc((void**)&dd.current_task, sizeof(int)));
 }
 
 // processes 0th level of expansion
@@ -1341,6 +1333,9 @@ void free_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc)
     //DEBUG
     chkerr(cudaFree(dd.debug));
     chkerr(cudaFree(dd.idebug));
+
+    // tasks scheduling
+    chkerr(cudaFree(dd.current_task));
 }
 
 
@@ -2173,7 +2168,6 @@ inline bool h_cand_isvalid_LU(Vertex vertex, int clique_size, int upper_bound, i
     }
 }
 
-
 inline bool h_vert_isextendable_LU(Vertex vertex, int clique_size, int upper_bound, int lower_bound, int min_ext_deg)
 {
     if (vertex.indeg + vertex.exdeg < minimum_degrees[minimum_clique_size]) {
@@ -2896,6 +2890,36 @@ void print_vertices(Vertex* vertices, int size)
     cout << endl;
 }
 
+void initialize_maxes()
+{
+    mts = 0;
+    mbs = 0;
+    mbo = 0;
+    mcs = 0;
+    mco = 0;
+    wts = 0;
+    wto = 0;
+    wcs = 0;
+    wco = 0;
+    mvs = 0;
+}
+
+void print_maxes()
+{
+    cout << endl
+        << "TASKS SIZE: " << mts << endl
+        << "BUFFER SIZE: " << mbs << endl
+        << "BUFFER OFFSET SIZE: " << mbo << endl
+        << "CLIQUES SIZE: " << mcs << endl
+        << "CLIQUES OFFSET SIZE: " << mco << endl
+        << "WCLIQUES SIZE: " << wcs << endl
+        << "WCLIQUES OFFSET SIZE: " << wco << endl
+        << "WTASKS SIZE: " << wts << endl
+        << "WTASKS OFFSET SIZE: " << wto << endl
+        << "VERTICES SIZE: " << mvs << endl
+        << endl;
+}
+
 
 
 // --- DEVICE KERNELS ---
@@ -2932,7 +2956,16 @@ __global__ void d_expand_level(GPU_Data dd)
 
 
     // --- CURRENT LEVEL ---
-    for (int i = WARP_IDX; i < (*(dd.read_count)); i += NUMBER_OF_WARPS)
+
+    // initialize i for each warp
+    int i = 0;
+    if (LANE_IDX == 0) {
+        i = atomicAdd(dd.current_task, 1);
+    }
+    i = __shfl_sync(0xFFFFFFFF, i, 0);
+    
+    while (i < (*(dd.read_count)))
+    //for (int i = WARP_IDX; i < (*(dd.read_count)); i += NUMBER_OF_WARPS)
     {
         // get information on vertices being handled within tasks
         if (LANE_IDX == 0) {
@@ -2968,6 +3001,11 @@ __global__ void d_expand_level(GPU_Data dd)
         // LOOKAHEAD PRUNING
         method_return = d_lookahead_pruning(dd, wd, ld);
         if (method_return) {
+            // schedule warps next task
+            if (LANE_IDX == 0) {
+                i = atomicAdd(dd.current_task, 1);
+            }
+            i = __shfl_sync(0xFFFFFFFF, i, 0);
             continue;
         }
 
@@ -3062,6 +3100,14 @@ __global__ void d_expand_level(GPU_Data dd)
                 d_write_to_tasks(dd, wd, ld);
             }
         }
+
+
+
+        // schedule warps next task
+        if (LANE_IDX == 0) {
+            i = atomicAdd(dd.current_task, 1);
+        }
+        i = __shfl_sync(0xFFFFFFFF, i, 0);
     }
 
 
@@ -3103,21 +3149,25 @@ __global__ void transfer_buffers(GPU_Data dd)
         dd.write_vertices = dd.tasks1_vertices;
     }
 
-    // block level
+    // point of this is to find how many vertices will be transfered to tasks, it is easy to know how many tasks as it will just
+    // be the expansion threshold, but to find how many vertices we must now the total size of all the tasks that will be copied.
+    // each block does this but really could be done by one thread outside the GPU
     if (threadIdx.x == 0) {
         toffsetwrite = 0;
         twrite = 0;
 
-        for (int i = 0; i < ((NUM_OF_BLOCKS * BLOCK_SIZE) / WARP_SIZE); i++) {
+        for (int i = 0; i < NUMBER_OF_WARPS; i++) {
+            // if next warps count is more than expand threshold mark as such and break
             if (toffsetwrite + dd.wtasks_count[i] >= EXPAND_THRESHOLD) {
                 twarp = i;
                 break;
             }
+            // else adds its size and count
             twrite += dd.wtasks_offset[(WTASKS_OFFSET_SIZE * i) + dd.wtasks_count[i]];
             toffsetwrite += dd.wtasks_count[i];
         }
-        tasks_end = twrite + dd.wtasks_offset[(WTASKS_OFFSET_SIZE * twarp) +
-            (EXPAND_THRESHOLD - toffsetwrite)];
+        // final size is the size of all tasks up until last warp and the remaining tasks in the last warp until expand threshold is satisfied
+        tasks_end = twrite + dd.wtasks_offset[(WTASKS_OFFSET_SIZE * twarp) + (EXPAND_THRESHOLD - toffsetwrite)];
     }
     __syncthreads();
 
@@ -3282,6 +3332,7 @@ __device__ int d_lookahead_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     }
     __syncwarp();
 
+    int local_wi, local_wcc, local_wco;
     if (wd.success[WIB_IDX]) {
         // write to cliques
         uint64_t start_write = (WCLIQUES_SIZE * WARP_IDX) + dd.wcliques_offset[(WCLIQUES_OFFSET_SIZE * WARP_IDX) + (dd.wcliques_count[WARP_IDX])];
@@ -4307,8 +4358,7 @@ __device__ void d_check_for_clique(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
         }
         if (LANE_IDX == 0) {
             (dd.wcliques_count[WARP_IDX])++;
-            dd.wcliques_offset[(WCLIQUES_OFFSET_SIZE * WARP_IDX) + (dd.wcliques_count[WARP_IDX])] = start_write - (WCLIQUES_SIZE * WARP_IDX) +
-                wd.number_of_members[WIB_IDX];
+            dd.wcliques_offset[(WCLIQUES_OFFSET_SIZE * WARP_IDX) + (dd.wcliques_count[WARP_IDX])] = start_write - (WCLIQUES_SIZE * WARP_IDX) + wd.number_of_members[WIB_IDX];
         }
     }
 }
