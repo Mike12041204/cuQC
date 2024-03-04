@@ -22,7 +22,7 @@ using namespace std;
 
 // GPU KERNEL LAUNCH
 #define BLOCK_SIZE 1024
-#define NUM_OF_BLOCKS 216
+#define NUM_OF_BLOCKS 22
 #define WARP_SIZE 32
 
 // GPU INFORMATION
@@ -37,8 +37,8 @@ using namespace std;
 // DATA STRUCTURE SIZE
 #define TASKS_SIZE 1800000
 #define TASKS_PER_WARP 5
-#define BUFFER_SIZE 10000
-#define BUFFER_OFFSET_SIZE 100
+#define BUFFER_SIZE 1000000
+#define BUFFER_OFFSET_SIZE 1000000
 #define CLIQUES_SIZE 3000000
 #define CLIQUES_OFFSET_SIZE 60000
 #define CLIQUES_PERCENT 100
@@ -208,11 +208,6 @@ struct GPU_Data
     uint64_t* cliques_offset_start;
     uint64_t* cliques_start;
 
-    // TODO - remove these
-    // DEBUG
-    bool* debug;
-    int* idebug;
-
     // GPU GRAPH
     int* number_of_vertices;
     int* number_of_edges;
@@ -265,7 +260,6 @@ struct Warp_Data
     int removed_count[WARPS_PER_BLOCK];
     int remaining_count[WARPS_PER_BLOCK];
     int num_val_cands[WARPS_PER_BLOCK];
-    // remove this after changing
     int rw_counter[WARPS_PER_BLOCK];
 
     int min_ext_deg[WARPS_PER_BLOCK];
@@ -279,14 +273,10 @@ struct Warp_Data
     int sum_clq_indeg[WARPS_PER_BLOCK];
     int sum_candidate_indeg[WARPS_PER_BLOCK];
 
-    // try to combine
     bool invalid_bounds[WARPS_PER_BLOCK];
     bool success[WARPS_PER_BLOCK];
 
     int number_of_crit_adj[WARPS_PER_BLOCK];
-
-    // not used
-    Vertex* vertices[WARPS_PER_BLOCK];
 
     // for dynamic intersection
     int count[WARPS_PER_BLOCK];
@@ -351,9 +341,6 @@ bool print_Warp_Data_Sizes(GPU_Data& dd);
 void print_All_Warp_Data_Sizes(GPU_Data& dd);
 bool print_Warp_Data_Sizes_Every(GPU_Data& dd, int every);
 void print_All_Warp_Data_Sizes_Every(GPU_Data& dd, int every);
-void print_debug(GPU_Data& dd);
-void print_idebug(GPU_Data& dd);
-void print_idebug(GPU_Data& dd);
 void initialize_maxes();
 void print_maxes();
 
@@ -397,15 +384,13 @@ __device__ void d_print_vertices(Vertex* vertices, int size);
 // - 
 
 // TODO (LOW PRIORITY)
-// - doesnt run when cpu et is greater than gpu et
-// - only need to fill gpu tasks first round if cpu expand is less than gpu expand
-// - ensure no unecessary syncs on the gpu
 // - reevaluate and change where uint64_t's are used
 // - label for vertices can be a byte rather than int
-// - dont need lvl2adj in all places anymore
+// - don't need lvl2adj in all places anymore
 // - look for places where we can break early
-// - improve d_degree_pruning
-// - improve transfer_buffers
+// - examine code for unnecessary syncs on the GPU
+// - in degree pruning see if we can remove failed_found by consolidating with success
+// - see whether it's possible to parallelize some of calculate_LU_bounds
 
 
 
@@ -454,6 +439,10 @@ int main(int argc, char* argv[])
     minimum_clique_size = atoi(argv[3]);
     if (minimum_clique_size <= 1) {
         printf("minimum size must be greater than 1\n");
+        return 1;
+    }
+    if (CPU_EXPAND_THRESHOLD > EXPAND_THRESHOLD) {
+        cout << "CPU_EXPAND_THRESHOLD must be less than the EXPAND_THRESHOLD" << endl;
         return 1;
     }
 
@@ -835,13 +824,6 @@ void allocate_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc, CPU_Graph& hg)
     chkerr(cudaMalloc((void**)&dd.cliques_offset_start, sizeof(uint64_t)));
     chkerr(cudaMalloc((void**)&dd.cliques_start, sizeof(uint64_t)));
 
-    // DEBUG
-    chkerr(cudaMalloc((void**)&dd.debug, sizeof(bool)));
-    chkerr(cudaMalloc((void**)&dd.idebug, sizeof(int)));
-
-    chkerr(cudaMemset(dd.debug, false, sizeof(bool)));
-    chkerr(cudaMemset(dd.idebug, 0, sizeof(int)));
-
     // task scheduling
     chkerr(cudaMalloc((void**)&dd.current_task, sizeof(int)));
 }
@@ -1095,7 +1077,6 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc)
 
 
         // NEXT LEVEL
-        // TODO - should be num_covered + num_mem, works since only covered when no mem, first round
         for (int j = number_of_covered; j < expansions; j++) {
 
 
@@ -1175,10 +1156,8 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc)
             //sort vertices so that lowest degree vertices are first in enumeration order before writing to tasks
             qsort(vertices, total_vertices, sizeof(Vertex), h_sort_vert_Q);
 
-            // TODO - do we need this if?
-            if (number_of_candidates > 0) {
-                h_write_to_tasks(hd, vertices, total_vertices, write_vertices, write_offsets, write_count);
-            }
+            // NOTE - removed id to write only fi there is atleast 1 cand
+            h_write_to_tasks(hd, vertices, total_vertices, write_vertices, write_offsets, write_count);
 
 
 
@@ -1189,9 +1168,11 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc)
 
 
     // FILL TASKS FROM BUFFER
+    // if last CPU round copy enough tasks for GPU expansion
     if ((*hd.current_level) == CPU_LEVELS && CPU_EXPAND_THRESHOLD < EXPAND_THRESHOLD && (*hd.buffer_count) > 0) {
         h_fill_from_buffer(hd, write_vertices, write_offsets, write_count, EXPAND_THRESHOLD);
     }
+    // if not enough generated to fully populate fill from buffer
     if (*write_count < CPU_EXPAND_THRESHOLD && (*hd.buffer_count) > 0){
         h_fill_from_buffer(hd, write_vertices, write_offsets, write_count, CPU_EXPAND_THRESHOLD);
     }
@@ -1340,10 +1321,6 @@ void free_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc)
     chkerr(cudaFree(dd.cliques_offset_start));
     chkerr(cudaFree(dd.cliques_start));
 
-    //DEBUG
-    chkerr(cudaFree(dd.debug));
-    chkerr(cudaFree(dd.idebug));
-
     // tasks scheduling
     chkerr(cudaFree(dd.current_task));
 }
@@ -1420,11 +1397,12 @@ int h_remove_one_vertex(CPU_Graph& hg, CPU_Data& hd, Vertex* read_vertices, int&
     uint64_t pneighbors_end;
     int phelper1;
 
+    // helper variables
     int mindeg;
-
     bool failed_found;
 
-    // TODO - change vert is extendable to Quick check using mindeg
+
+
     mindeg = h_get_mindeg(num_mem);
 
     // remove one vertex
@@ -2615,24 +2593,6 @@ void print_All_Warp_Data_Sizes_Every(GPU_Data& dd, int every)
     }
 }
 
-void print_debug(GPU_Data& dd)
-{
-    bool debug;
-    chkerr(cudaMemcpy(&debug, dd.debug, sizeof(bool), cudaMemcpyDeviceToHost));
-    if (debug) {
-        cout << "!!!DEBUG!!! " << endl;
-    }
-    chkerr(cudaMemset(dd.debug, false, sizeof(bool)));
-}
-
-void print_idebug(GPU_Data& dd)
-{
-    int idebug;
-    chkerr(cudaMemcpy(&idebug, dd.idebug, sizeof(int), cudaMemcpyDeviceToHost));
-    cout << "IDebug: " << idebug << flush;
-    chkerr(cudaMemset(dd.idebug, 0, sizeof(int)));
-}
-
 bool print_Data_Sizes_Every(GPU_Data& dd, int every)
 {
     bool result = false;
@@ -2957,7 +2917,8 @@ __global__ void d_expand_level(GPU_Data dd)
         dd.read_count = dd.tasks1_count;
         dd.read_offsets = dd.tasks1_offset;
         dd.read_vertices = dd.tasks1_vertices;
-    } else {
+    }
+    else {
         dd.read_count = dd.tasks2_count;
         dd.read_offsets = dd.tasks2_offset;
         dd.read_vertices = dd.tasks2_vertices;
@@ -2975,7 +2936,6 @@ __global__ void d_expand_level(GPU_Data dd)
     i = __shfl_sync(0xFFFFFFFF, i, 0);
     
     while (i < (*(dd.read_count)))
-    //for (int i = WARP_IDX; i < (*(dd.read_count)); i += NUMBER_OF_WARPS)
     {
         // get information on vertices being handled within tasks
         if (LANE_IDX == 0) {
@@ -3105,10 +3065,8 @@ __global__ void d_expand_level(GPU_Data dd)
             // sort vertices in Quick efficient enumeration order before writing
             d_sort(ld.vertices, wd.total_vertices[WIB_IDX], d_sort_vert_Q);
 
-            // TODO - do we need this if?
-            if (wd.number_of_candidates[WIB_IDX] > 0) {
-                d_write_to_tasks(dd, wd, ld);
-            }
+            // NOTE - removed if to write only is atleast 1 cand
+            d_write_to_tasks(dd, wd, ld);
         }
 
 
@@ -3199,7 +3157,6 @@ __global__ void transfer_buffers(GPU_Data dd)
     }
     __syncwarp();
     
-    // TODO - split up these for loops to avoid conditional checks
     // move to tasks and buffer
     for (int i = LANE_IDX + 1; i <= dd.wtasks_count[WARP_IDX]; i += WARP_SIZE)
     {
@@ -3588,7 +3545,6 @@ __device__ int d_critical_vertex_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data
     return 0;
 }
 
-// TODO - check for extra syncs
 // diameter pruning intitializes vertices labels and candidate indegs array for use in iterative degree pruning
 __device__ void d_diameter_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld, int pvertexid)
 {
@@ -3695,8 +3651,6 @@ __device__ void d_diameter_pruning_cv(GPU_Data& dd, Warp_Data& wd, Local_Data& l
     __syncwarp();
 }
 
-// TODO - check for extra syncs
-// TODO - remove return and just use wd.success
 // returns true if invalid bounds or failed found
 __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 {
@@ -4110,7 +4064,6 @@ __device__ void d_calculate_LU_bounds(GPU_Data& dd, Warp_Data& wd, Local_Data& l
         __syncwarp();
     }
 
-    // TODO - see if some of this can be parallelized
     if (LANE_IDX == 0) {
         if (wd.min_clq_indeg[WIB_IDX] < dd.minimum_degrees[wd.number_of_members[WIB_IDX]])
         {
@@ -4343,9 +4296,6 @@ __device__ int d_sort_vert_Q(Vertex& v1, Vertex& v2)
         return -1;
     else if (v1.label != 3 && v2.label == 3)
         return 1;
-    // TODO - don't need this line
-    else if (v1.label == 0 && v2.label != 0)
-        return -1;
     else if (v1.indeg > v2.indeg)
         return -1;
     else if (v1.indeg < v2.indeg)
