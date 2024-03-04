@@ -35,24 +35,25 @@ using namespace std;
 #define NUMBER_OF_THREADS (NUM_OF_BLOCKS * BLOCK_SIZE)
 
 // DATA STRUCTURE SIZE
-#define TASKS_SIZE 100000000
-#define TASKS_PER_WARP 100
-#define BUFFER_SIZE 1000000000
-#define BUFFER_OFFSET_SIZE 10000000
-#define CLIQUES_SIZE 100000000
-#define CLIQUES_OFFSET_SIZE 1000000
+#define TASKS_SIZE 1800000
+#define TASKS_PER_WARP 5
+#define BUFFER_SIZE 10000
+#define BUFFER_OFFSET_SIZE 100
+#define CLIQUES_SIZE 3000000
+#define CLIQUES_OFFSET_SIZE 60000
 #define CLIQUES_PERCENT 100
 // per warp
-#define WCLIQUES_SIZE 100000
-#define WCLIQUES_OFFSET_SIZE 10000
-#define WTASKS_SIZE 300000
-#define WTASKS_OFFSET_SIZE 10000
+#define WCLIQUES_SIZE 2000
+#define WCLIQUES_OFFSET_SIZE 100
+#define WTASKS_SIZE 2000
+#define WTASKS_OFFSET_SIZE 100
 // global memory vertices, should be a multiple of 32 as to not waste space
-#define WVERTICES_SIZE 32000
+#define WVERTICES_SIZE 640
 // shared memory vertices
 #define VERTICES_SIZE 70
 
 #define EXPAND_THRESHOLD (TASKS_PER_WARP * NUMBER_OF_WARPS)
+#define CLIQUES_DUMP (CLIQUES_SIZE * (CLIQUES_PERCENT / 100.0))
  
 // PROGRAM RUN SETTINGS
 // cpu settings
@@ -576,8 +577,8 @@ void search(CPU_Graph& hg, ofstream& temp_results)
     for (int i = 0; i < CPU_LEVELS + 1 && !(*hd.maximal_expansion); i++) {
         h_expand_level(hg, hd, hc);
     
-        // if cliques is more than half full, flush to file
-        if (hc.cliques_offset[(*hc.cliques_count)] > (double)CLIQUES_SIZE / 2.0) {
+        // if cliques is more than threshold dump
+        if (hc.cliques_offset[(*hc.cliques_count)] > CLIQUES_DUMP) {
             flush_cliques(hc, temp_results);
         }
 
@@ -662,7 +663,8 @@ void search(CPU_Graph& hg, ofstream& temp_results)
         chkerr(cudaMemcpy(&cliques_size, dd.cliques_offset + cliques_count, sizeof(uint64_t), cudaMemcpyDeviceToHost));
         cudaDeviceSynchronize();
 
-        if (cliques_size > (double)CLIQUES_SIZE / 2.0) {
+        // if cliques is more than threshold dump
+        if (cliques_size > CLIQUES_DUMP) {
             dump_cliques(hc, dd, temp_results);
         }
 
