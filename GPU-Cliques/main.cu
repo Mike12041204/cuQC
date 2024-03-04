@@ -37,8 +37,8 @@ using namespace std;
 // DATA STRUCTURE SIZE
 #define TASKS_SIZE 1800000
 #define TASKS_PER_WARP 5
-#define BUFFER_SIZE 1000000
-#define BUFFER_OFFSET_SIZE 1000000
+#define BUFFER_SIZE 10000
+#define BUFFER_OFFSET_SIZE 1000
 #define CLIQUES_SIZE 3000000
 #define CLIQUES_OFFSET_SIZE 60000
 #define CLIQUES_PERCENT 100
@@ -383,7 +383,7 @@ __device__ void d_print_vertices(Vertex* vertices, int size);
 // TODO (HIGH PRIORITY)
 // - 
 
-// TODO (LOW PRIORITY)
+// TODO (LOW PRIORITY - these are all not worth the time to do)
 // - reevaluate and change where uint64_t's are used
 // - label for vertices can be a byte rather than int
 // - don't need lvl2adj in all places anymore
