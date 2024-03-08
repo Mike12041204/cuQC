@@ -239,6 +239,9 @@ struct GPU_Data
 
     // task scheduling
     int* current_task;
+
+    // PRUNING TEST
+    int* mode;
 };
 
 // WARP DATA
@@ -404,6 +407,9 @@ double minimum_degree_ratio;
 int minimum_clique_size;
 int* minimum_degrees;
 
+// PRUNING TEST
+int mode;
+
 
 
 // MAIN
@@ -445,6 +451,7 @@ int main(int argc, char* argv[])
         cout << "CPU_EXPAND_THRESHOLD must be less than the EXPAND_THRESHOLD" << endl;
         return 1;
     }
+    mode = atoi(argv[5]);
 
 
 
@@ -826,6 +833,10 @@ void allocate_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc, CPU_Graph& hg)
 
     // task scheduling
     chkerr(cudaMalloc((void**)&dd.current_task, sizeof(int)));
+
+    // PRUNING TEST
+    chkerr(cudaMalloc((void**)&dd.mode, sizeof(int)));
+    chkerr(cudaMemcpy(dd.mode, &mode, sizeof(int), cudaMemcpyHostToDevice));
 }
 
 // processes 0th level of expansion
@@ -2969,14 +2980,16 @@ __global__ void d_expand_level(GPU_Data dd)
 
 
         // LOOKAHEAD PRUNING
-        method_return = d_lookahead_pruning(dd, wd, ld);
-        if (method_return) {
-            // schedule warps next task
-            if (LANE_IDX == 0) {
-                i = atomicAdd(dd.current_task, 1);
+        if (*dd.mode == 1 || *dd.mode == 4) {
+            method_return = d_lookahead_pruning(dd, wd, ld);
+            if (method_return) {
+                // schedule warps next task
+                if (LANE_IDX == 0) {
+                    i = atomicAdd(dd.current_task, 1);
+                }
+                i = __shfl_sync(0xFFFFFFFF, i, 0);
+                continue;
             }
-            i = __shfl_sync(0xFFFFFFFF, i, 0);
-            continue;
         }
 
 
@@ -3029,22 +3042,24 @@ __global__ void d_expand_level(GPU_Data dd)
             // ADD ONE VERTEX
             method_return = d_add_one_vertex(dd, wd, ld);
 
-            // if failed found check for clique and continue on to the next iteration
-            if (method_return == 1) {
-                if (wd.number_of_members[WIB_IDX] >= (*dd.minimum_clique_size)) {
-                    d_check_for_clique(dd, wd, ld);
+            if (*dd.mode == 3 || *dd.mode == 4) {
+                // if failed found check for clique and continue on to the next iteration
+                if (method_return == 1) {
+                    if (wd.number_of_members[WIB_IDX] >= (*dd.minimum_clique_size)) {
+                        d_check_for_clique(dd, wd, ld);
+                    }
+                    continue;
                 }
-                continue;
-            }
 
 
 
-            // CRITICAL VERTEX PRUNING
-            method_return = d_critical_vertex_pruning(dd, wd, ld);
+                // CRITICAL VERTEX PRUNING
+                method_return = d_critical_vertex_pruning(dd, wd, ld);
 
-            // critical fail, cannot be clique continue onto next iteration
-            if (method_return == 2) {
-                continue;
+                // critical fail, cannot be clique continue onto next iteration
+                if (method_return == 2) {
+                    continue;
+                }
             }
 
 
