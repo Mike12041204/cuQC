@@ -1156,7 +1156,6 @@ void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc)
             //sort vertices so that lowest degree vertices are first in enumeration order before writing to tasks
             qsort(vertices, total_vertices, sizeof(Vertex), h_sort_vert_Q);
 
-            // TODO - do we need this if?
             if (number_of_candidates > 0) {
                 h_write_to_tasks(hd, vertices, total_vertices, write_vertices, write_offsets, write_count);
             }
@@ -3067,7 +3066,6 @@ __global__ void d_expand_level(GPU_Data dd)
             // sort vertices in Quick efficient enumeration order before writing
             d_sort(ld.vertices, wd.total_vertices[WIB_IDX], d_sort_vert_Q);
 
-            // TODO - do we need this if?
             if (wd.number_of_candidates[WIB_IDX] > 0) {
                 d_write_to_tasks(dd, wd, ld);
             }
@@ -3676,7 +3674,6 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
     d_sort_i(dd.candidate_indegs + (WVERTICES_SIZE * WARP_IDX), wd.remaining_count[WIB_IDX], d_sort_degs);
 
-    // UNSURE - can we just set number of candidates and remaining count
     d_calculate_LU_bounds(dd, wd, ld, wd.remaining_count[WIB_IDX]);
     if (wd.invalid_bounds[WIB_IDX]) {
         return true;
@@ -3894,7 +3891,6 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 
         d_sort_i(dd.candidate_indegs + (WVERTICES_SIZE * WARP_IDX), wd.num_val_cands[WIB_IDX], d_sort_degs);
 
-        // UNSURE - can we just set number of candidates and num val cands
         d_calculate_LU_bounds(dd, wd, ld, wd.num_val_cands[WIB_IDX]);
         if (wd.invalid_bounds[WIB_IDX]) {
             return true;
