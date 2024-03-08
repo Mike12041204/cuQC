@@ -35,20 +35,20 @@ using namespace std;
 #define NUMBER_OF_THREADS (NUM_OF_BLOCKS * BLOCK_SIZE)
 
 // DATA STRUCTURE SIZE
-#define TASKS_SIZE 100000000
+#define TASKS_SIZE 1000000
 #define TASKS_PER_WARP 100
-#define BUFFER_SIZE 1000000000
-#define BUFFER_OFFSET_SIZE 10000000
-#define CLIQUES_SIZE 100000000
-#define CLIQUES_OFFSET_SIZE 1000000
+#define BUFFER_SIZE 10000000
+#define BUFFER_OFFSET_SIZE 100000
+#define CLIQUES_SIZE 1000000
+#define CLIQUES_OFFSET_SIZE 10000
 #define CLIQUES_PERCENT 50
 // per warp
-#define WCLIQUES_SIZE 10000
-#define WCLIQUES_OFFSET_SIZE 1000
-#define WTASKS_SIZE 300000
-#define WTASKS_OFFSET_SIZE 10000
+#define WCLIQUES_SIZE 1000
+#define WCLIQUES_OFFSET_SIZE 100
+#define WTASKS_SIZE 30000
+#define WTASKS_OFFSET_SIZE 1000
 // global memory vertices, should be a multiple of 32 as to not waste space
-#define WVERTICES_SIZE 32000
+#define WVERTICES_SIZE 3200
 // shared memory vertices
 #define VERTICES_SIZE 70
 
@@ -2927,15 +2927,8 @@ __global__ void d_expand_level(GPU_Data dd)
 
 
     // --- CURRENT LEVEL ---
-
-    // initialize i for each warp
-    int i = 0;
-    if (LANE_IDX == 0) {
-        i = atomicAdd(dd.current_task, 1);
-    }
-    i = __shfl_sync(0xFFFFFFFF, i, 0);
     
-    while (i < (*(dd.read_count)))
+    for (int i = WARP_IDX; i < (*(dd.read_count)); i += NUMBER_OF_WARPS)
     {
         // get information on vertices being handled within tasks
         if (LANE_IDX == 0) {
@@ -2971,11 +2964,6 @@ __global__ void d_expand_level(GPU_Data dd)
         // LOOKAHEAD PRUNING
         method_return = d_lookahead_pruning(dd, wd, ld);
         if (method_return) {
-            // schedule warps next task
-            if (LANE_IDX == 0) {
-                i = atomicAdd(dd.current_task, 1);
-            }
-            i = __shfl_sync(0xFFFFFFFF, i, 0);
             continue;
         }
 
@@ -3068,14 +3056,6 @@ __global__ void d_expand_level(GPU_Data dd)
             // NOTE - removed if to write only is atleast 1 cand
             d_write_to_tasks(dd, wd, ld);
         }
-
-
-
-        // schedule warps next task
-        if (LANE_IDX == 0) {
-            i = atomicAdd(dd.current_task, 1);
-        }
-        i = __shfl_sync(0xFFFFFFFF, i, 0);
     }
 
 
