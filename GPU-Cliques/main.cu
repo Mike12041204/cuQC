@@ -35,20 +35,20 @@ using namespace std;
 #define NUMBER_OF_THREADS (NUM_OF_BLOCKS * BLOCK_SIZE)
 
 // DATA STRUCTURE SIZE
-#define TASKS_SIZE 100000000
+#define TASKS_SIZE 1000000
 #define TASKS_PER_WARP 100
-#define BUFFER_SIZE 1000000000
-#define BUFFER_OFFSET_SIZE 10000000
-#define CLIQUES_SIZE 100000000
-#define CLIQUES_OFFSET_SIZE 1000000
+#define BUFFER_SIZE 10000000
+#define BUFFER_OFFSET_SIZE 100000
+#define CLIQUES_SIZE 1000000
+#define CLIQUES_OFFSET_SIZE 10000
 #define CLIQUES_PERCENT 50
 // per warp
-#define WCLIQUES_SIZE 10000
-#define WCLIQUES_OFFSET_SIZE 1000
-#define WTASKS_SIZE 300000
-#define WTASKS_OFFSET_SIZE 10000
+#define WCLIQUES_SIZE 1000
+#define WCLIQUES_OFFSET_SIZE 100
+#define WTASKS_SIZE 30000
+#define WTASKS_OFFSET_SIZE 1000
 // global memory vertices, should be a multiple of 32 as to not waste space
-#define WVERTICES_SIZE 32000
+#define WVERTICES_SIZE 3200
 // shared memory vertices
 #define VERTICES_SIZE 70
 
@@ -3774,13 +3774,8 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
                 read[i].exdeg = 0;
             }
 
-            if (LANE_IDX == 0) {
-                wd.count[WIB_IDX] = 0;
-            }
-            __syncwarp();
-
             // update exdeg based on remaining candidates, every lane should get the next vertex to intersect dynamically
-            for (int i = atomicAdd(wd.count + WIB_IDX, 1); i < wd.number_of_members[WIB_IDX]; i = atomicAdd(wd.count + WIB_IDX, 1)) {
+            for (int i = LANE_IDX; i < wd.number_of_members[WIB_IDX]; i += WARP_SIZE) {
                 pvertexid = ld.vertices[i].vertexid;
 
                 for (int j = 0; j < wd.remaining_count[WIB_IDX]; j++) {
@@ -3793,12 +3788,7 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
                 }
             }
 
-            if (LANE_IDX == 0) {
-                wd.count[WIB_IDX] = 0;
-            }
-            __syncwarp();
-
-            for (int i = atomicAdd(wd.count + WIB_IDX, 1); i < wd.remaining_count[WIB_IDX]; i = atomicAdd(wd.count + WIB_IDX, 1)) {
+            for (int i = LANE_IDX; i < wd.remaining_count[WIB_IDX]; i += WARP_SIZE) {
                 pvertexid = read[i].vertexid;
 
                 for (int j = 0; j < wd.remaining_count[WIB_IDX]; j++) {
@@ -3816,13 +3806,8 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
             }
         }
         else {
-            if (LANE_IDX == 0) {
-                wd.count[WIB_IDX] = 0;
-            }
-            __syncwarp();
-
             // via removed, update exdeg based on remaining candidates, again lane scheduling should be dynamic
-            for (int i = atomicAdd(wd.count + WIB_IDX, 1); i < wd.number_of_members[WIB_IDX]; i = atomicAdd(wd.count + WIB_IDX, 1)) {
+            for (int i = LANE_IDX; i < wd.number_of_members[WIB_IDX]; i += WARP_SIZE) {
                 pvertexid = ld.vertices[i].vertexid;
 
                 for (int j = 0; j < wd.removed_count[WIB_IDX]; j++) {
@@ -3835,12 +3820,7 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
                 }
             }
 
-            if (LANE_IDX == 0) {
-                wd.count[WIB_IDX] = 0;
-            }
-            __syncwarp();
-
-            for (int i = atomicAdd(wd.count + WIB_IDX, 1); i < wd.remaining_count[WIB_IDX]; i = atomicAdd(wd.count + WIB_IDX, 1)) {
+            for (int i = LANE_IDX; i < wd.remaining_count[WIB_IDX]; i += WARP_SIZE) {
                 pvertexid = read[i].vertexid;
 
                 for (int j = 0; j < wd.removed_count[WIB_IDX]; j++) {
