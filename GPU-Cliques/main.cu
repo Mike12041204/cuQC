@@ -3775,13 +3775,10 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
                 read[i].exdeg = 0;
             }
 
-            if (LANE_IDX == 0) {
-                wd.count[WIB_IDX] = 0;
-            }
-            __syncwarp();
+
 
             // update exdeg based on remaining candidates, every lane should get the next vertex to intersect dynamically
-            for (int i = atomicAdd(wd.count + WIB_IDX, 1); i < wd.number_of_members[WIB_IDX]; i = atomicAdd(wd.count + WIB_IDX, 1)) {
+            for (int i = LANE_IDX; i < wd.number_of_members[WIB_IDX]; i += WARP_SIZE) {
                 pvertexid = ld.vertices[i].vertexid;
 
                 for (int j = 0; j < wd.remaining_count[WIB_IDX]; j++) {
@@ -3794,12 +3791,7 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
                 }
             }
 
-            if (LANE_IDX == 0) {
-                wd.count[WIB_IDX] = 0;
-            }
-            __syncwarp();
-
-            for (int i = atomicAdd(wd.count + WIB_IDX, 1); i < wd.remaining_count[WIB_IDX]; i = atomicAdd(wd.count + WIB_IDX, 1)) {
+            for (int i = LANE_IDX; i < wd.remaining_count[WIB_IDX]; i += WARP_SIZE) {
                 pvertexid = read[i].vertexid;
 
                 for (int j = 0; j < wd.remaining_count[WIB_IDX]; j++) {
@@ -3817,13 +3809,8 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
             }
         }
         else {
-            if (LANE_IDX == 0) {
-                wd.count[WIB_IDX] = 0;
-            }
-            __syncwarp();
-
             // via removed, update exdeg based on remaining candidates, again lane scheduling should be dynamic
-            for (int i = atomicAdd(wd.count + WIB_IDX, 1); i < wd.number_of_members[WIB_IDX]; i = atomicAdd(wd.count + WIB_IDX, 1)) {
+            for (int i = LANE_IDX; i < wd.number_of_members[WIB_IDX]; i += WARP_SIZE) {
                 pvertexid = ld.vertices[i].vertexid;
 
                 for (int j = 0; j < wd.removed_count[WIB_IDX]; j++) {
@@ -3836,12 +3823,7 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
                 }
             }
 
-            if (LANE_IDX == 0) {
-                wd.count[WIB_IDX] = 0;
-            }
-            __syncwarp();
-
-            for (int i = atomicAdd(wd.count + WIB_IDX, 1); i < wd.remaining_count[WIB_IDX]; i = atomicAdd(wd.count + WIB_IDX, 1)) {
+            for (int i = LANE_IDX; i < wd.remaining_count[WIB_IDX]; i += WARP_SIZE) {
                 pvertexid = read[i].vertexid;
 
                 for (int j = 0; j < wd.removed_count[WIB_IDX]; j++) {
