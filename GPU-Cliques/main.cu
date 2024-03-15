@@ -1330,7 +1330,7 @@ void free_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc)
 
 // --- HOST EXPANSION METHODS ---
 
-// returns 1 if lookahead was a success, else 0
+// returns 1 if lookahead was a success, else 0 
 int h_lookahead_pruning(CPU_Graph& hg, CPU_Cliques& hc, CPU_Data& hd, Vertex* read_vertices, int tot_vert, int num_mem, int num_cand, uint64_t start)
 {
     // intersection
