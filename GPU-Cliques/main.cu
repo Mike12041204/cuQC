@@ -37,16 +37,16 @@ using namespace std;
 // DATA STRUCTURE SIZE
 #define TASKS_SIZE 100000000
 #define TASKS_PER_WARP 1
-#define BUFFER_SIZE 100000000
-#define BUFFER_OFFSET_SIZE 1000000
-#define CLIQUES_SIZE 1000000
-#define CLIQUES_OFFSET_SIZE 10000
+#define BUFFER_SIZE 250000000
+#define BUFFER_OFFSET_SIZE 2500000
+#define CLIQUES_SIZE 10000000
+#define CLIQUES_OFFSET_SIZE 100000
 #define CLIQUES_PERCENT 50
 // per warp
 #define WCLIQUES_SIZE 10000
-#define WCLIQUES_OFFSET_SIZE 100
-#define WTASKS_SIZE 390000L
-#define WTASKS_OFFSET_SIZE 2000
+#define WCLIQUES_OFFSET_SIZE 1000
+#define WTASKS_SIZE 350000L
+#define WTASKS_OFFSET_SIZE 10000
 // global memory vertices, should be a multiple of 32 as to not waste space
 #define WVERTICES_SIZE 32000
 // shared memory vertices
@@ -3774,6 +3774,7 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
             for (int i = LANE_IDX; i < wd.remaining_count[WIB_IDX]; i += WARP_SIZE) {
                 read[i].exdeg = 0;
             }
+            __syncwarp();
 
 
 
