@@ -35,20 +35,20 @@ using namespace std;
 #define NUMBER_OF_THREADS (NUM_OF_BLOCKS * BLOCK_SIZE)
 
 // DATA STRUCTURE SIZE
-#define TASKS_SIZE 55000
-#define TASKS_PER_WARP 100
-#define BUFFER_SIZE 1000
-#define BUFFER_OFFSET_SIZE 1000
-#define CLIQUES_SIZE 99000
-#define CLIQUES_OFFSET_SIZE 3200
-#define CLIQUES_PERCENT 100
+#define TASKS_SIZE 100000000
+#define TASKS_PER_WARP 1
+#define BUFFER_SIZE 100000000
+#define BUFFER_OFFSET_SIZE 1000000
+#define CLIQUES_SIZE 1000000
+#define CLIQUES_OFFSET_SIZE 10000
+#define CLIQUES_PERCENT 50
 // per warp
-#define WCLIQUES_SIZE 1000
+#define WCLIQUES_SIZE 10000
 #define WCLIQUES_OFFSET_SIZE 100
-#define WTASKS_SIZE 1000L
-#define WTASKS_OFFSET_SIZE 100
+#define WTASKS_SIZE 390000L
+#define WTASKS_OFFSET_SIZE 2000
 // global memory vertices, should be a multiple of 32 as to not waste space
-#define WVERTICES_SIZE 320
+#define WVERTICES_SIZE 32000
 // shared memory vertices
 #define VERTICES_SIZE 70
 
@@ -331,7 +331,7 @@ void print_CPU_Graph(CPU_Graph& hg);
 void print_GPU_Graph(GPU_Data& dd, CPU_Graph& hg);
 void print_WTask_Buffers(GPU_Data& dd);
 void print_WClique_Buffers(GPU_Data& dd);
-void print_GPU_Cliques(GPU_Data& dd);
+void print_GPU_Cliques(GPU_Data& dd); 
 void print_CPU_Cliques(CPU_Cliques& hc);
 bool print_Data_Sizes(GPU_Data& dd);
 void h_print_Data_Sizes(CPU_Data& hd, CPU_Cliques& hc);
