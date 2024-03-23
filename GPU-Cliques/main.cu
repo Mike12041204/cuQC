@@ -3476,6 +3476,7 @@ __device__ int d_remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     int phelper2;
 
     int mindeg;
+    bool failed_found;
 
     mindeg = d_get_mindeg(wd.num_mem[WIB_IDX], dd);
 
@@ -3483,14 +3484,14 @@ __device__ int d_remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     if (LANE_IDX == 0) {
         wd.num_cand[WIB_IDX]--;
         wd.tot_vert[WIB_IDX]--;
-        wd.success[WIB_IDX] = false;
     }
     __syncwarp();
 
     // update info of vertices connected to removed cand
     pvertexid = dd.read_vertices[wd.start[WIB_IDX] + wd.tot_vert[WIB_IDX]].vertexid;
+    failed_found = false;
 
-    for (int i = LANE_IDX; i < wd.tot_vert[WIB_IDX] && !wd.success[WIB_IDX]; i += WARP_SIZE) {
+    for (int i = LANE_IDX; i < wd.tot_vert[WIB_IDX]; i += WARP_SIZE) {
         phelper1 = dd.read_vertices[wd.start[WIB_IDX] + i].vertexid;
         phelper2 = d_bsearch_array(dd.onehop_neighbors + dd.onehop_offsets[pvertexid], dd.onehop_offsets[pvertexid + 1] - dd.onehop_offsets[pvertexid], phelper1);
 
@@ -3498,14 +3499,14 @@ __device__ int d_remove_one_vertex(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
             dd.read_vertices[wd.start[WIB_IDX] + i].exdeg--;
 
             if (phelper1 < wd.num_mem[WIB_IDX] && dd.read_vertices[wd.start[WIB_IDX] + phelper1].indeg + dd.read_vertices[wd.start[WIB_IDX] + phelper1].exdeg < mindeg) {
-                wd.success[WIB_IDX] = true;
+                failed_found = true;
                 break;
             }
         }
     }
-    __syncwarp();
 
-    if (wd.success[WIB_IDX]) {
+    failed_found = __any_sync(0xFFFFFFFF, failed_found);
+    if (failed_found) {
         return 1;
     }
 
