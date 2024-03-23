@@ -21,8 +21,8 @@ using namespace std;
 
 
 // GPU KERNEL LAUNCH
-#define BLOCK_SIZE 1024
-#define NUM_OF_BLOCKS 216
+#define BLOCK_SIZE 512
+#define NUM_OF_BLOCKS 22
 #define WARP_SIZE 32
 
 // GPU INFORMATION
@@ -37,15 +37,15 @@ using namespace std;
 // DATA STRUCTURE SIZE
 #define TASKS_SIZE 100000000
 #define TASKS_PER_WARP 1
-#define BUFFER_SIZE 250000000
-#define BUFFER_OFFSET_SIZE 2500000
+#define BUFFER_SIZE 100000000
+#define BUFFER_OFFSET_SIZE 1000000
 #define CLIQUES_SIZE 10000000
 #define CLIQUES_OFFSET_SIZE 100000
 #define CLIQUES_PERCENT 50
 // per warp
 #define WCLIQUES_SIZE 10000
 #define WCLIQUES_OFFSET_SIZE 1000
-#define WTASKS_SIZE 350000L
+#define WTASKS_SIZE 300000L
 #define WTASKS_OFFSET_SIZE 10000
 // global memory vertices, should be a multiple of 32 as to not waste space
 #define WVERTICES_SIZE 32000
@@ -59,7 +59,7 @@ using namespace std;
 // cpu settings
 #define CPU_LEVELS 1
 #define CPU_EXPAND_THRESHOLD 1
-// debug toggle
+// debug toggle 0-normal/1-debug
 #define DEBUG_TOGGLE 0
 
 
@@ -202,6 +202,7 @@ struct GPU_Data
     double* minimum_degree_ratio;
     int* minimum_degrees;
     int* minimum_clique_size;
+    int* scheduling_toggle;
 
     uint64_t* buffer_offset_start;
     uint64_t* buffer_start;
@@ -391,6 +392,7 @@ __device__ void d_print_vertices(Vertex* vertices, int size);
 // - examine code for unnecessary syncs on the GPU
 // - in degree pruning see if we can remove failed_found by consolidating with success
 // - see whether it's possible to parallelize some of calculate_LU_bounds
+// - remove device expand level code duplication by using a method
 
 
 
@@ -403,6 +405,7 @@ uint64_t mts, mbs, mbo, mcs, mco, wts, wto, wcs, wco, mvs;
 double minimum_degree_ratio;
 int minimum_clique_size;
 int* minimum_degrees;
+int scheduling_toggle;
 
 
 
@@ -422,8 +425,8 @@ int main(int argc, char* argv[])
 
 
     // ENSURE PROPER USAGE
-    if (argc != 5) {
-        printf("Usage: ./main <graph_file> <gamma> <min_size> <output_file.txt>\n");
+    if (argc != 6) {
+        printf("Usage: ./main <graph_file> <gamma> <min_size> <output_file.txt> <scheduling toggle 0-dyanmic/1-static>\n");
         return 1;
     }
     ifstream graph_stream(argv[1], ios::in);
@@ -440,6 +443,10 @@ int main(int argc, char* argv[])
     if (minimum_clique_size <= 1) {
         printf("minimum size must be greater than 1\n");
         return 1;
+    }
+    scheduling_toggle = atoi(argv[5]);
+    if (!(scheduling_toggle == 0 || scheduling_toggle == 1)) {
+        cout << "scheduling toggle must be 0 or 1" << endl;
     }
     if (CPU_EXPAND_THRESHOLD > EXPAND_THRESHOLD) {
         cout << "CPU_EXPAND_THRESHOLD must be less than the EXPAND_THRESHOLD" << endl;
@@ -783,10 +790,12 @@ void allocate_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc, CPU_Graph& hg)
     chkerr(cudaMalloc((void**)&dd.minimum_degree_ratio, sizeof(double)));
     chkerr(cudaMalloc((void**)&dd.minimum_degrees, sizeof(int) * (hg.number_of_vertices + 1)));
     chkerr(cudaMalloc((void**)&dd.minimum_clique_size, sizeof(int)));
+    chkerr(cudaMalloc((void**)&dd.scheduling_toggle, sizeof(int)));
 
     chkerr(cudaMemcpy(dd.minimum_degree_ratio, &minimum_degree_ratio, sizeof(double), cudaMemcpyHostToDevice));
     chkerr(cudaMemcpy(dd.minimum_degrees, minimum_degrees, sizeof(int) * (hg.number_of_vertices + 1), cudaMemcpyHostToDevice));
     chkerr(cudaMemcpy(dd.minimum_clique_size, &minimum_clique_size, sizeof(int), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(dd.scheduling_toggle, &scheduling_toggle, sizeof(int), cudaMemcpyHostToDevice));
 
     chkerr(cudaMalloc((void**)&dd.total_tasks, sizeof(int)));
 
@@ -1300,6 +1309,7 @@ void free_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc)
     chkerr(cudaFree(dd.minimum_degree_ratio));
     chkerr(cudaFree(dd.minimum_degrees));
     chkerr(cudaFree(dd.minimum_clique_size));
+    chkerr(cudaFree(dd.scheduling_toggle));
 
     chkerr(cudaFree(dd.total_tasks));
 
@@ -2929,155 +2939,292 @@ __global__ void d_expand_level(GPU_Data dd)
 
     // --- CURRENT LEVEL ---
 
-    // initialize i for each warp
-    int i = 0;
-    if (LANE_IDX == 0) {
-        i = atomicAdd(dd.current_task, 1);
-    }
-    i = __shfl_sync(0xFFFFFFFF, i, 0);
-    
-    while (i < (*(dd.read_count)))
-    {
-        // get information on vertices being handled within tasks
+    // scheduling toggle = 0, dynamic intersection
+    if (*dd.scheduling_toggle == 0) {
+        // initialize i for each warp
+        int i = 0;
         if (LANE_IDX == 0) {
-            wd.start[WIB_IDX] = dd.read_offsets[i];
-            wd.end[WIB_IDX] = dd.read_offsets[i + 1];
-            wd.tot_vert[WIB_IDX] = wd.end[WIB_IDX] - wd.start[WIB_IDX];
+            i = atomicAdd(dd.current_task, 1);
         }
-        __syncwarp();
+        i = __shfl_sync(0xFFFFFFFF, i, 0);
 
-        // each warp gets partial number of members
-        num_mem = 0;
-        for (uint64_t j = wd.start[WIB_IDX] + LANE_IDX; j < wd.end[WIB_IDX]; j += WARP_SIZE) {
-            if (dd.read_vertices[j].label != 1) {
-                break;
+        while (i < (*(dd.read_count)))
+        {
+            // get information on vertices being handled within tasks
+            if (LANE_IDX == 0) {
+                wd.start[WIB_IDX] = dd.read_offsets[i];
+                wd.end[WIB_IDX] = dd.read_offsets[i + 1];
+                wd.tot_vert[WIB_IDX] = wd.end[WIB_IDX] - wd.start[WIB_IDX];
             }
-            num_mem++;
-        }
-        // sum members across warp
-        for (int k = 1; k < 32; k *= 2) {
-            num_mem += __shfl_xor_sync(0xFFFFFFFF, num_mem, k);
-        }
+            __syncwarp();
 
-        if (LANE_IDX == 0) {
-            wd.num_mem[WIB_IDX] = num_mem;
-            wd.num_cand[WIB_IDX] = wd.tot_vert[WIB_IDX] - wd.num_mem[WIB_IDX];
-            wd.expansions[WIB_IDX] = wd.num_cand[WIB_IDX];
-        }
-        __syncwarp();
+            // each warp gets partial number of members
+            num_mem = 0;
+            for (uint64_t j = wd.start[WIB_IDX] + LANE_IDX; j < wd.end[WIB_IDX]; j += WARP_SIZE) {
+                if (dd.read_vertices[j].label != 1) {
+                    break;
+                }
+                num_mem++;
+            }
+            // sum members across warp
+            for (int k = 1; k < 32; k *= 2) {
+                num_mem += __shfl_xor_sync(0xFFFFFFFF, num_mem, k);
+            }
+
+            if (LANE_IDX == 0) {
+                wd.num_mem[WIB_IDX] = num_mem;
+                wd.num_cand[WIB_IDX] = wd.tot_vert[WIB_IDX] - wd.num_mem[WIB_IDX];
+                wd.expansions[WIB_IDX] = wd.num_cand[WIB_IDX];
+            }
+            __syncwarp();
 
 
 
 
-        // LOOKAHEAD PRUNING
-        method_return = d_lookahead_pruning(dd, wd, ld);
-        if (method_return) {
+            // LOOKAHEAD PRUNING
+            method_return = d_lookahead_pruning(dd, wd, ld);
+            if (method_return) {
+                // schedule warps next task
+                if (LANE_IDX == 0) {
+                    i = atomicAdd(dd.current_task, 1);
+                }
+                i = __shfl_sync(0xFFFFFFFF, i, 0);
+                continue;
+            }
+
+
+
+            // --- NEXT LEVEL ---
+            for (int j = 0; j < wd.expansions[WIB_IDX]; j++)
+            {
+
+
+
+                // REMOVE ONE VERTEX
+                if (j > 0) {
+                    method_return = d_remove_one_vertex(dd, wd, ld);
+                    if (method_return) {
+                        break;
+                    }
+                }
+
+
+
+                // INITIALIZE NEW VERTICES
+                if (LANE_IDX == 0) {
+                    wd.number_of_members[WIB_IDX] = wd.num_mem[WIB_IDX];
+                    wd.number_of_candidates[WIB_IDX] = wd.num_cand[WIB_IDX];
+                    wd.total_vertices[WIB_IDX] = wd.tot_vert[WIB_IDX];
+                }
+                __syncwarp();
+
+                // select whether to store vertices in global or shared memory based on size
+                if (wd.total_vertices[WIB_IDX] <= VERTICES_SIZE) {
+                    ld.vertices = wd.shared_vertices + (VERTICES_SIZE * WIB_IDX);
+                }
+                else {
+                    ld.vertices = dd.global_vertices + (WVERTICES_SIZE * WARP_IDX);
+                }
+
+                for (index = LANE_IDX; index < wd.number_of_members[WIB_IDX]; index += WARP_SIZE) {
+                    ld.vertices[index] = dd.read_vertices[wd.start[WIB_IDX] + index];
+                }
+                for (; index < wd.total_vertices[WIB_IDX] - 1; index += WARP_SIZE) {
+                    ld.vertices[index + 1] = dd.read_vertices[wd.start[WIB_IDX] + index];
+                }
+
+                if (LANE_IDX == 0) {
+                    ld.vertices[wd.number_of_members[WIB_IDX]] = dd.read_vertices[wd.start[WIB_IDX] + wd.total_vertices[WIB_IDX] - 1];
+                }
+                __syncwarp();
+
+
+
+                // ADD ONE VERTEX
+                method_return = d_add_one_vertex(dd, wd, ld);
+
+                // if failed found check for clique and continue on to the next iteration
+                if (method_return == 1) {
+                    if (wd.number_of_members[WIB_IDX] >= (*dd.minimum_clique_size)) {
+                        d_check_for_clique(dd, wd, ld);
+                    }
+                    continue;
+                }
+
+
+
+                // CRITICAL VERTEX PRUNING
+                method_return = d_critical_vertex_pruning(dd, wd, ld);
+
+                // critical fail, cannot be clique continue onto next iteration
+                if (method_return == 2) {
+                    continue;
+                }
+
+
+
+                // HANDLE CLIQUES
+                if (wd.number_of_members[WIB_IDX] >= (*dd.minimum_clique_size)) {
+                    d_check_for_clique(dd, wd, ld);
+                }
+
+                // if vertex in x found as not extendable continue to next iteration
+                if (method_return == 1) {
+                    continue;
+                }
+
+
+
+                // WRITE TASKS TO BUFFERS
+                // sort vertices in Quick efficient enumeration order before writing
+                d_sort(ld.vertices, wd.total_vertices[WIB_IDX], d_sort_vert_Q);
+
+                if (wd.number_of_candidates[WIB_IDX] > 0) {
+                    d_write_to_tasks(dd, wd, ld);
+                }
+            }
+
+
+
             // schedule warps next task
             if (LANE_IDX == 0) {
                 i = atomicAdd(dd.current_task, 1);
             }
             i = __shfl_sync(0xFFFFFFFF, i, 0);
-            continue;
         }
-
-
-
-        // --- NEXT LEVEL ---
-        for (int j = 0; j < wd.expansions[WIB_IDX]; j++)
+    }
+    else {
+        for (int i = WARP_IDX; i < (*(dd.read_count)); i += NUMBER_OF_WARPS)
         {
+            // get information on vertices being handled within tasks
+            if (LANE_IDX == 0) {
+                wd.start[WIB_IDX] = dd.read_offsets[i];
+                wd.end[WIB_IDX] = dd.read_offsets[i + 1];
+                wd.tot_vert[WIB_IDX] = wd.end[WIB_IDX] - wd.start[WIB_IDX];
+            }
+            __syncwarp();
 
-
-
-            // REMOVE ONE VERTEX
-            if (j > 0) {
-                method_return = d_remove_one_vertex(dd, wd, ld);
-                if (method_return) {
+            // each warp gets partial number of members
+            num_mem = 0;
+            for (uint64_t j = wd.start[WIB_IDX] + LANE_IDX; j < wd.end[WIB_IDX]; j += WARP_SIZE) {
+                if (dd.read_vertices[j].label != 1) {
                     break;
                 }
+                num_mem++;
             }
-
-
-
-            // INITIALIZE NEW VERTICES
-            if (LANE_IDX == 0) {
-                wd.number_of_members[WIB_IDX] = wd.num_mem[WIB_IDX];
-                wd.number_of_candidates[WIB_IDX] = wd.num_cand[WIB_IDX];
-                wd.total_vertices[WIB_IDX] = wd.tot_vert[WIB_IDX];
-            }
-            __syncwarp();
-
-            // select whether to store vertices in global or shared memory based on size
-            if (wd.total_vertices[WIB_IDX] <= VERTICES_SIZE) {
-                ld.vertices = wd.shared_vertices + (VERTICES_SIZE * WIB_IDX);
-            } else {
-                ld.vertices = dd.global_vertices + (WVERTICES_SIZE * WARP_IDX);
-            }
-
-            for (index = LANE_IDX; index < wd.number_of_members[WIB_IDX]; index += WARP_SIZE) {
-                ld.vertices[index] = dd.read_vertices[wd.start[WIB_IDX] + index];
-            }
-            for (; index < wd.total_vertices[WIB_IDX] - 1; index += WARP_SIZE) {
-                ld.vertices[index + 1] = dd.read_vertices[wd.start[WIB_IDX] + index];
+            // sum members across warp
+            for (int k = 1; k < 32; k *= 2) {
+                num_mem += __shfl_xor_sync(0xFFFFFFFF, num_mem, k);
             }
 
             if (LANE_IDX == 0) {
-                ld.vertices[wd.number_of_members[WIB_IDX]] = dd.read_vertices[wd.start[WIB_IDX] + wd.total_vertices[WIB_IDX] - 1];
+                wd.num_mem[WIB_IDX] = num_mem;
+                wd.num_cand[WIB_IDX] = wd.tot_vert[WIB_IDX] - wd.num_mem[WIB_IDX];
+                wd.expansions[WIB_IDX] = wd.num_cand[WIB_IDX];
             }
             __syncwarp();
 
 
 
-            // ADD ONE VERTEX
-            method_return = d_add_one_vertex(dd, wd, ld);
 
-            // if failed found check for clique and continue on to the next iteration
-            if (method_return == 1) {
+            // LOOKAHEAD PRUNING
+            method_return = d_lookahead_pruning(dd, wd, ld);
+            if (method_return) {
+                continue;
+            }
+
+
+
+            // --- NEXT LEVEL ---
+            for (int j = 0; j < wd.expansions[WIB_IDX]; j++)
+            {
+
+
+
+                // REMOVE ONE VERTEX
+                if (j > 0) {
+                    method_return = d_remove_one_vertex(dd, wd, ld);
+                    if (method_return) {
+                        break;
+                    }
+                }
+
+
+
+                // INITIALIZE NEW VERTICES
+                if (LANE_IDX == 0) {
+                    wd.number_of_members[WIB_IDX] = wd.num_mem[WIB_IDX];
+                    wd.number_of_candidates[WIB_IDX] = wd.num_cand[WIB_IDX];
+                    wd.total_vertices[WIB_IDX] = wd.tot_vert[WIB_IDX];
+                }
+                __syncwarp();
+
+                // select whether to store vertices in global or shared memory based on size
+                if (wd.total_vertices[WIB_IDX] <= VERTICES_SIZE) {
+                    ld.vertices = wd.shared_vertices + (VERTICES_SIZE * WIB_IDX);
+                }
+                else {
+                    ld.vertices = dd.global_vertices + (WVERTICES_SIZE * WARP_IDX);
+                }
+
+                for (index = LANE_IDX; index < wd.number_of_members[WIB_IDX]; index += WARP_SIZE) {
+                    ld.vertices[index] = dd.read_vertices[wd.start[WIB_IDX] + index];
+                }
+                for (; index < wd.total_vertices[WIB_IDX] - 1; index += WARP_SIZE) {
+                    ld.vertices[index + 1] = dd.read_vertices[wd.start[WIB_IDX] + index];
+                }
+
+                if (LANE_IDX == 0) {
+                    ld.vertices[wd.number_of_members[WIB_IDX]] = dd.read_vertices[wd.start[WIB_IDX] + wd.total_vertices[WIB_IDX] - 1];
+                }
+                __syncwarp();
+
+
+
+                // ADD ONE VERTEX
+                method_return = d_add_one_vertex(dd, wd, ld);
+
+                // if failed found check for clique and continue on to the next iteration
+                if (method_return == 1) {
+                    if (wd.number_of_members[WIB_IDX] >= (*dd.minimum_clique_size)) {
+                        d_check_for_clique(dd, wd, ld);
+                    }
+                    continue;
+                }
+
+
+
+                // CRITICAL VERTEX PRUNING
+                method_return = d_critical_vertex_pruning(dd, wd, ld);
+
+                // critical fail, cannot be clique continue onto next iteration
+                if (method_return == 2) {
+                    continue;
+                }
+
+
+
+                // HANDLE CLIQUES
                 if (wd.number_of_members[WIB_IDX] >= (*dd.minimum_clique_size)) {
                     d_check_for_clique(dd, wd, ld);
                 }
-                continue;
-            }
+
+                // if vertex in x found as not extendable continue to next iteration
+                if (method_return == 1) {
+                    continue;
+                }
 
 
 
-            // CRITICAL VERTEX PRUNING
-            method_return = d_critical_vertex_pruning(dd, wd, ld);
+                // WRITE TASKS TO BUFFERS
+                // sort vertices in Quick efficient enumeration order before writing
+                d_sort(ld.vertices, wd.total_vertices[WIB_IDX], d_sort_vert_Q);
 
-            // critical fail, cannot be clique continue onto next iteration
-            if (method_return == 2) {
-                continue;
-            }
-
-
-
-            // HANDLE CLIQUES
-            if (wd.number_of_members[WIB_IDX] >= (*dd.minimum_clique_size)) {
-                d_check_for_clique(dd, wd, ld);
-            }
-
-            // if vertex in x found as not extendable continue to next iteration
-            if (method_return == 1) {
-                continue;
-            }
-
-
-
-            // WRITE TASKS TO BUFFERS
-            // sort vertices in Quick efficient enumeration order before writing
-            d_sort(ld.vertices, wd.total_vertices[WIB_IDX], d_sort_vert_Q);
-
-            if (wd.number_of_candidates[WIB_IDX] > 0) {
-                d_write_to_tasks(dd, wd, ld);
+                if (wd.number_of_candidates[WIB_IDX] > 0) {
+                    d_write_to_tasks(dd, wd, ld);
+                }
             }
         }
-
-
-
-        // schedule warps next task
-        if (LANE_IDX == 0) {
-            i = atomicAdd(dd.current_task, 1);
-        }
-        i = __shfl_sync(0xFFFFFFFF, i, 0);
     }
 
 
