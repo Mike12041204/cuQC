@@ -35,20 +35,20 @@ using namespace std;
 #define NUMBER_OF_THREADS (NUM_OF_BLOCKS * BLOCK_SIZE)
 
 // DATA STRUCTURE SIZE
-#define TASKS_SIZE 100000000
-#define TASKS_PER_WARP 1
-#define BUFFER_SIZE 100000000
-#define BUFFER_OFFSET_SIZE 1000000
-#define CLIQUES_SIZE 10000000
-#define CLIQUES_OFFSET_SIZE 100000
-#define CLIQUES_PERCENT 50
+#define TASKS_SIZE 31000
+#define TASKS_PER_WARP 100
+#define BUFFER_SIZE 10000
+#define BUFFER_OFFSET_SIZE 10000
+#define CLIQUES_SIZE 152000
+#define CLIQUES_OFFSET_SIZE 15000
+#define CLIQUES_PERCENT 100
 // per warp
-#define WCLIQUES_SIZE 10000
-#define WCLIQUES_OFFSET_SIZE 1000
-#define WTASKS_SIZE 300000L
-#define WTASKS_OFFSET_SIZE 10000
+#define WCLIQUES_SIZE 100
+#define WCLIQUES_OFFSET_SIZE 10
+#define WTASKS_SIZE 1000L
+#define WTASKS_OFFSET_SIZE 100
 // global memory vertices, should be a multiple of 32 as to not waste space
-#define WVERTICES_SIZE 32000
+#define WVERTICES_SIZE 320
 // shared memory vertices
 #define VERTICES_SIZE 70
 
@@ -59,6 +59,9 @@ using namespace std;
 // cpu settings
 #define CPU_LEVELS 1
 #define CPU_EXPAND_THRESHOLD 1
+// whether the program will run entirely on the CPU or not, 0-CPU/GPU 1-CPU only
+#define CPU_MODE 0
+
 // debug toggle 0-normal/1-debug
 #define DEBUG_TOGGLE 0
 
@@ -591,8 +594,10 @@ void search(CPU_Graph& hg, ofstream& temp_results)
 
 
     // TRANSFER TO GPU
-    move_to_gpu(hd, dd);
-    cudaDeviceSynchronize();
+    if (!CPU_MODE) {
+        move_to_gpu(hd, dd);
+        cudaDeviceSynchronize();
+    }
 
 
 
