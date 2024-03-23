@@ -3821,6 +3821,8 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     int lane_remaining_count;
     int lane_removed_count;
 
+    bool failed_found;
+
 
 
     d_sort_i(dd.candidate_indegs + (WVERTICES_SIZE * WARP_IDX), wd.remaining_count[WIB_IDX], d_sort_degs);
@@ -3831,19 +3833,16 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     }
 
     // check for failed vertices
-    if (LANE_IDX == 0) {
-        wd.success[WIB_IDX] = false;
-    }
-    __syncwarp();
-    for (int k = LANE_IDX; k < wd.number_of_members[WIB_IDX] && !wd.success[WIB_IDX]; k += WARP_SIZE) {
+    failed_found = false;
+    for (int k = LANE_IDX; k < wd.number_of_members[WIB_IDX]; k += WARP_SIZE) {
         if (!d_vert_isextendable_LU(ld.vertices[k], dd, wd, ld)) {
-            wd.success[WIB_IDX] = true;
+            failed_found = true;
             break;
         }
 
     }
-    __syncwarp();
-    if (wd.success[WIB_IDX]) {
+    failed_found = __any_sync(0xFFFFFFFF, failed_found);
+    if (failed_found) {
         return true;
     }
 
@@ -4031,15 +4030,15 @@ __device__ bool d_degree_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
         }
 
         // check for failed vertices
-        for (int k = LANE_IDX; k < wd.number_of_members[WIB_IDX] && !wd.success[WIB_IDX]; k += WARP_SIZE) {
+        for (int k = LANE_IDX; k < wd.number_of_members[WIB_IDX]; k += WARP_SIZE) {
             if (!d_vert_isextendable_LU(ld.vertices[k], dd, wd, ld)) {
-                wd.success[WIB_IDX] = true;
+               failed_found = true;
                 break;
             }
 
         }
-        __syncwarp();
-        if (wd.success[WIB_IDX]) {
+        failed_found = __any_sync(0xFFFFFFFF, failed_found);
+        if (failed_found) {
             return true;
         }
 
