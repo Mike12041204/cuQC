@@ -21,8 +21,8 @@ using namespace std;
 
 
 // GPU KERNEL LAUNCH
-#define BLOCK_SIZE 512
-#define NUM_OF_BLOCKS 22
+#define BLOCK_SIZE 1024
+#define NUM_OF_BLOCKS 216
 #define WARP_SIZE 32
 
 // GPU INFORMATION
