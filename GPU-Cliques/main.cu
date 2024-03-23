@@ -3404,25 +3404,23 @@ __global__ void fill_from_buffer(GPU_Data dd)
 // returns 1 if lookahead succesful, 0 otherwise 
 __device__ int d_lookahead_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
 {
+    bool lookahead_success;
     int pvertexid;
     int phelper1;
     int phelper2;
 
-    if (LANE_IDX == 0) {
-        wd.success[WIB_IDX] = true;
-    }
-    __syncwarp();
+    lookahead_success = true;
 
     // check if members meet degree requirement, dont need to check 2hop adj as diameter pruning guarentees all members will be within 2hops of eveything
-    for (int i = LANE_IDX; i < wd.num_mem[WIB_IDX] && wd.success[WIB_IDX]; i += WARP_SIZE) {
+    for (int i = LANE_IDX; i < wd.num_mem[WIB_IDX]; i += WARP_SIZE) {
         if (dd.read_vertices[wd.start[WIB_IDX] + i].indeg + dd.read_vertices[wd.start[WIB_IDX] + i].exdeg < dd.minimum_degrees[wd.tot_vert[WIB_IDX]]) {
-            wd.success[WIB_IDX] = false;
+            lookahead_success = false;
             break;
         }
     }
-    __syncwarp();
 
-    if (!wd.success[WIB_IDX]) {
+    lookahead_success = !(__any_sync(0xFFFFFFFF, !lookahead_success));
+    if (!lookahead_success) {
         return 0;
     }
 
@@ -3446,15 +3444,15 @@ __device__ int d_lookahead_pruning(GPU_Data& dd, Warp_Data& wd, Local_Data& ld)
     __syncwarp();
 
     // compares all vertices to the lemmas from Quick
-    for (int j = wd.num_mem[WIB_IDX] + LANE_IDX; j < wd.tot_vert[WIB_IDX] && wd.success[WIB_IDX]; j += WARP_SIZE) {
+    for (int j = wd.num_mem[WIB_IDX] + LANE_IDX; j < wd.tot_vert[WIB_IDX]; j += WARP_SIZE) {
         if (dd.read_vertices[wd.start[WIB_IDX] + j].lvl2adj < wd.num_cand[WIB_IDX] - 1 || dd.read_vertices[wd.start[WIB_IDX] + j].indeg + dd.read_vertices[wd.start[WIB_IDX] + j].exdeg < dd.minimum_degrees[wd.tot_vert[WIB_IDX]]) {
-            wd.success[WIB_IDX] = false;
+            lookahead_success = false;
             break;
         }
-    }
-    __syncwarp();
+    }   
+    lookahead_success = !(__any_sync(0xFFFFFFFF, !lookahead_success));
 
-    if (wd.success[WIB_IDX]) {
+    if (lookahead_success) {
         // write to cliques
         uint64_t start_write = (WCLIQUES_SIZE * WARP_IDX) + dd.wcliques_offset[(WCLIQUES_OFFSET_SIZE * WARP_IDX) + (dd.wcliques_count[WARP_IDX])];
         for (int j = LANE_IDX; j < wd.tot_vert[WIB_IDX]; j += WARP_SIZE) {
