@@ -35,20 +35,20 @@ using namespace std;
 #define NUMBER_OF_THREADS (NUM_OF_BLOCKS * BLOCK_SIZE)
 
 // DATA STRUCTURE SIZE
-#define TASKS_SIZE 55000
+#define TASKS_SIZE 1000
 #define TASKS_PER_WARP 100
-#define BUFFER_SIZE 10000
-#define BUFFER_OFFSET_SIZE 10000
-#define CLIQUES_SIZE 100000
-#define CLIQUES_OFFSET_SIZE 4000
+#define BUFFER_SIZE 1000
+#define BUFFER_OFFSET_SIZE 1000
+#define CLIQUES_SIZE 1000
+#define CLIQUES_OFFSET_SIZE 100
 #define CLIQUES_PERCENT 100
 // per warp
-#define WCLIQUES_SIZE 1000
-#define WCLIQUES_OFFSET_SIZE 100
+#define WCLIQUES_SIZE 100
+#define WCLIQUES_OFFSET_SIZE 10
 #define WTASKS_SIZE 1000L
 #define WTASKS_OFFSET_SIZE 100
 // global memory vertices, should be a multiple of 32 as to not waste space
-#define WVERTICES_SIZE 320
+#define WVERTICES_SIZE 3200
 // shared memory vertices
 #define VERTICES_SIZE 70
 
