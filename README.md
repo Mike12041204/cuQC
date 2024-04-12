@@ -160,3 +160,6 @@ VERTICES SIZE: 55
 
 ## Dataset
 * See the related paper for links to all the used data sets, and refer to the `Preparing Datasets` section on how to prepare them or other graphs for running by cuQC.
+
+# Release
+[![DOI](https://zenodo.org/badge/617138667.svg)](https://zenodo.org/doi/10.5281/zenodo.10963361)
