@@ -163,3 +163,6 @@ VERTICES SIZE: 55
 
 # DOI
 [![DOI](https://zenodo.org/badge/617138667.svg)](https://zenodo.org/doi/10.5281/zenodo.10963361)
+
+# License
+Refer to LICENSE.md in the root directory.
