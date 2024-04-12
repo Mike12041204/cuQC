@@ -1,7 +1,7 @@
 # cuQC: Accelerating Maximal Quasi-Clique Mining using the GPU
-This repository contains the code for the "cuQC: Accelerating Maximal Quasi-Clique Mining using the GPU" program, as well as related graph formatting tools. the cuQC program is a powerful maximal y-quasi-clique enumerator for the GPU.
-## Obtaining the latest version of the program
-Visit the [cuQC Github](https://github.com/Mike12041204/cuQC) to obtain the latest version of this software.
+This repository contains the code for the "cuQC: Accelerating Maximal Quasi-Clique Mining using the GPU" program, as well as related graph formatting tools. The cuQC program is a powerful maximal y-quasi-clique miner for the GPU.
+## Obtaining the Latest Version
+Visit the [cuQC Github](https://github.com/Mike12041204/cuQC) to obtain the latest version of this program.
 ## Package Requirements
 * CUDA(>=12.2.0)
 
@@ -22,7 +22,7 @@ Given a graph *input* in the format of an adjacency list, where line 1 in the gr
 .
 .
 ```
-We can convert *input* to the serialized format used by cuQC by using the adjToSer.cpp code.
+We can convert *input* to the serialized format by using the adjToSer.cpp code.
 
 This program should first be compiled using `g++` to an executable file, if this executable were to be named *AtoS* then the line would be as such:
 ```
@@ -62,11 +62,11 @@ When using cuQC it should be noted that most data structure sizes and their rela
 ```
 We have set the program with default definitions which should work on a GPU with `40GB` of global memory for most graphs.
 
-However, if a `segmentation fault` or `bus error` occurs during cuQC's run, these definitions may not be suitable for the graph. These definitions should be corrected by running the program again, this time in debug mode. This mode can be toggled on for cuQC by changing a definition within the program. This definition has the name of `DEBUG_MODE` and has two options: `0 - off` and `1 - on`. When debug mode is on, the program will display information indicating the size of the data within the data structures at each partial step and will provide information on which of these data structures might be causing the memory issue. This mode should allow the fine-tuning of the data structure definitions to allow cuQC to work on numerous graphs of considerable size. As explained in the paper tuning the definition `TASKS_PER_WARP` may also decrease the memory usage of the program. Of course, at some point, a graph will become too large to run, no matter what definitions are chosen.
+However, if a `segmentation fault` or `bus error` occurs during cuQC's run, these definitions may not be suitable for the graph. These definitions should be corrected by running the program again, this time in debug mode. This mode can be toggled on for cuQC by changing a definition within the program. This definition has the name of `DEBUG_MODE` and has two options: `0 - off` and `1 - on`. When debug mode is on, the program will display information indicating the size of the data within the data structures at each partial step and will provide information on which of these data structures might be causing the memory issue. This mode should allow the fine-tuning of the data structure definitions to allow cuQC to work on numerous graphs of considerable size. As explained in the paper, tuning the definition `TASKS_PER_WARP` may also decrease the memory usage of the program. Of course, at some point, a graph will become too large to run, no matter what definitions are chosen.
 
-It should also be noted that making the definitions for the data structure and thus their sizes as small as possible decreases the time spent by cuQC. This is because some of these data structures must be copied from the CPU to the GPU, and if they are smaller, it will take less time to do so. Thus, when timing cuQC, we would first run the program in debug mode to find some definitions that worked for the graph, then using the data structure size information given by DEBUG MODE, we would minimize the definitions to boost the speed of cuQC.
+It should also be noted that making the definitions for the data structure and thus their sizes as small as possible decreases the time spent by cuQC. This is because some of these data structures must be copied from the CPU to the GPU, and if they are smaller, it will take less time to do so. Thus, when timing cuQC, we would first run the program in debug mode to find some definitions that worked for the graph, then using the data structure size information given by debug mode, we would minimize the definitions to boost the speed of cuQC.
 ## Experiments
-For running experiments with cuQC, the host should have at least `32GB` of memory, and the device should have at least `40GB` of global memory. If the machine doesn't have that much memory cuQC will still be able to run some experiment scenarios on smaller graphs. But it may run out of memory, throw an error, and terminate the program for other cases. If this scenario occurs refer to the `Build Instructions` sections for how to proceed.
+For running experiments with cuQC, the host should have at least `32GB` of memory, and the device should have at least `40GB` of global memory. If the machine doesn't have that much memory, cuQC will still be able to run some experiment scenarios on smaller graphs. However, it may run out of memory, throw an error, and terminate the program in other cases. For some cases, the program may be able to run with the given amount of memory but require tuning of the data structures to do so; refer to the `Build Instructions` section for how to proceed with this.
 
 The program takes 5 parameters:
 1. graph_file, the file to find cliques in
@@ -105,7 +105,7 @@ Sample results.txt
 ```
 The first number in each line represents the number of vertices within the clique, and the next numbers in the line represent their IDs.
 
-Also note that if the program finds no cliques among completion, it will post an error and terminate.
+Also note that if the program finds no cliques at completion, it will post an error and terminate.
 
 Sample debug mode output (refer to `Build Instructions` section):
 ```
