@@ -152,7 +152,7 @@ VERTICES SIZE: 55
 --->:TOTAL TIME: 2144 ms
 >:PROGRAM END
 ```
-# Benchmarking platform and Dataset
+# Benchmarking Platform and Dataset
 ## Machine
 * GPU: Nvidia Ampere A100 (108SMs, 80GB)
 * OS: Red Hat Enterprise Linux Server release 7.9 (Maipo)
