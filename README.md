@@ -1,5 +1,5 @@
 # cuQC: Accelerating Maximal Quasi-Clique Mining using the GPU
-This repository contains the code for the "cuQC: Accelerating Maximal Quasi-Clique Mining using the GPU" program, as well as related graphs and graph formatting tools. the cuQC program is a powerful maximal y-quasi-clique enumerator for the GPU.
+This repository contains the code for the "cuQC: Accelerating Maximal Quasi-Clique Mining using the GPU" program, as well as related graph formatting tools. the cuQC program is a powerful maximal y-quasi-clique enumerator for the GPU.
 ## Obtaining the latest version of the program
 Visit the [cuQC Github](https://github.com/Mike12041204/cuQC) to obtain the latest version of this software.
 ## Package Requirements
