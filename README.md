@@ -2,13 +2,13 @@
 This repository contains the code for the "cuQC: Accelerating Maximal Quasi-Clique Mining using the GPU" program, as well as related graphs and graph formatting tools. the cuQC program is a powerful maximal y-quasi-clique enumerator for the GPU.
 ## Obtaining the latest version of the program
 Visit the [cuQC Github](https://github.com/Mike12041204/cuQC) to obtain the latest version of this software.
-## Package requirements
+## Package Requirements
 * CUDA(>=12.2.0)
 
 We used `CUDA 12.2.0`
-## Preparing datasets
+## Preparing Datasets
 Our program runs off graphs represented in a custom serialized format, designed to prevent duplicate processing of graphs. We provide tools to convert graphs to this format.
-### Software requirements for preparing graphs
+### Software Requirements for Preparing Graphs
 * g++
 * python3
 
@@ -53,7 +53,7 @@ We could use this code and *input* to generate the adjacency list representation
 ```
 python3 edgeToAdj.py input 0 >output
 ```
-## Build instructions
+## Build Instructions
 We provide a script to build the program. Running `build.sh` will compile the program and produce the `cuQC` executable.
 
 When using cuQC it should be noted that most data structure sizes and their related memory usage are determined statically at the start of the program through definitions, for example:
@@ -66,7 +66,7 @@ However, if a `segmentation fault` or `bus error` occurs during cuQC's run, thes
 
 It should also be noted that making the definitions for the data structure and thus their sizes as small as possible decreases the time spent by cuQC. This is because some of these data structures must be copied from the CPU to the GPU, and if they are smaller, it will take less time to do so. Thus, when timing cuQC, we would first run the program in debug mode to find some definitions that worked for the graph, then using the data structure size information given by DEBUG MODE, we would minimize the definitions to boost the speed of cuQC.
 ## Experiments
-For running experiments with cuQC, the host should have at least `32GB` of memory, and the device should have at least `40GB` of global memory. If the machine doesn't have that much memory cuQC will still be able to run some experiment scenarios on smaller graphs. But it may run out of memory, throw an error, and terminate the program for other cases. If this scenario occurs refer to the `Build instructions` sections for how to proceed.
+For running experiments with cuQC, the host should have at least `32GB` of memory, and the device should have at least `40GB` of global memory. If the machine doesn't have that much memory cuQC will still be able to run some experiment scenarios on smaller graphs. But it may run out of memory, throw an error, and terminate the program for other cases. If this scenario occurs refer to the `Build Instructions` sections for how to proceed.
 
 The program takes 5 parameters:
 1. graph_file, the file to find cliques in
@@ -81,23 +81,80 @@ The program might be run as:
 ```
 Sample output:
 ```
----
+>:PRE-PROCESSING
+--->:LOADING TIME: 33 ms
+>:INITIALIZING TASKS
+>:BEGINNING EXPANSION
+--->:ENUMERATION TIME: 171 ms
+>:REMOVING NON-MAXIMAL CLIQUES
+>:NUMBER OF MAXIMAL CLIQUES: 1602
+--->:REMOVE NON-MAX TIME: 21 ms
+--->:TOTAL TIME: 495 ms
+>:PROGRAM END
 ```
 Sample results.txt
 ```
----
+33 0 1 2 3 4 5 8 9 10 11 12 18 19 20 21 23 24 27 30 33 38 40 44 47 48 50 53 56 57 58 73 105 157
+33 0 1 2 3 4 5 8 9 10 11 12 18 19 20 21 23 24 27 30 33 38 40 44 47 48 50 53 56 57 58 73 105 304
+33 0 1 2 3 4 5 8 9 10 11 12 18 19 20 21 23 24 27 30 33 38 40 44 47 48 50 53 56 57 58 73 157 304
+33 0 1 2 3 4 5 8 9 10 11 12 18 19 20 21 23 24 27 30 33 38 40 44 47 48 50 53 56 57 58 105 157 304
+32 0 1 2 3 4 5 8 9 10 11 12 18 19 20 21 23 24 27 30 33 38 40 44 47 48 50 53 57 58 61 73 157
+.
+.
+.
 ```
-Sample debug mode output (refer to `Build instructions` section):
+The first number in each line represents the number of vertices within the clique, and the next numbers in the line represent their IDs.
+
+Also note that if the program finds no cliques among completion, it will post an error and terminate.
+
+Sample debug mode output (refer to `Build Instructions` section):
 ```
----
+>:PRE-PROCESSING
+--->:LOADING TIME: 4 ms
+>:INITIALIZING TASKS
+L: 0 T1: 1 55 T2: 0 0 B: 0 0 C: 0 0
+L: 1 T1: 1 55 T2: 1 55 B: 0 0 C: 0 0
+L: 2 T1: 24 1044 T2: 1 55 B: 0 0 C: 0 0
+>:BEGINNING EXPANSION
+WTasks( TC: 192 TS: 7212 MC: 12 MS: 515) WCliques ( TC: 0 TS: 0 MC: 0 MS: 0)
+L: 3 T1: 24 1044 T2: 192 7212 B: 0 0 C: 0 0
+
+WTasks( TC: 624 TS: 22060 MC: 12 MS: 452) WCliques ( TC: 21 TS: 640 MC: 3 MS: 91)
+L: 4 T1: 624 22060 T2: 192 7212 B: 0 0 C: 21 640
+.
+.
+.
 ```
 Sample debug mode output continued:
 ```
----
+.
+.
+.
+WTasks( TC: 0 TS: 0 MC: 0 MS: 0) WCliques ( TC: 4 TS: 128 MC: 1 MS: 32)
+L: 18 T1: 0 0 T2: 4 128 B: 0 0 C: 3163 98216
+
+--->:ENUMERATION TIME: 1834 ms
+
+TASKS SIZE: 53617
+BUFFER SIZE: 0
+BUFFER OFFSET SIZE: 0
+CLIQUES SIZE: 98216
+CLIQUES OFFSET SIZE: 3163
+WCLIQUES SIZE: 124
+WCLIQUES OFFSET SIZE: 4
+WTASKS SIZE: 515
+WTASKS OFFSET SIZE: 12
+VERTICES SIZE: 55
+
+>:REMOVING NON-MAXIMAL CLIQUES
+>:NUMBER OF MAXIMAL CLIQUES: 1602
+--->:REMOVE NON-MAX TIME: 22 ms
+--->:TOTAL TIME: 2144 ms
+>:PROGRAM END
 ```
 # Benchmarking platform and Dataset
 ## Machine
-* GPU: Nvidia Ampere A100 (108Sms, 80GB)
+* GPU: Nvidia Ampere A100 (108SMs, 80GB)
 * OS: Red Hat Enterprise Linux Server release 7.9 (Maipo)
 * CUDA: 12.2.0
 
