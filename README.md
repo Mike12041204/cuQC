@@ -45,7 +45,7 @@ Given a graph *input* provided in an edge list format where each line contains t
 ```
 We can convert *input* to an adjacency list format by using the edgeToAdj.py code.
 
-We noticed that some unweighted undirected graphs represented in an edge list format had one line per undirected edge, while others had two lines, the second where the source and destination are reversed. To handle this we adjusted the code to have the option to duplicate all edges. This option is either `0 - no duplication` or `1 - duplicate` and is taken on the command line when running the program as the second parameter.
+We noticed that some unweighted undirected graphs represented in an edge list format had one line per undirected edge, while others had two lines, the second where the source and destination are reversed. To handle this we adjusted the code to have the option to duplicate all edges. This option is either `0 - no duplication` or `1 - duplication` and is taken on the command line when running the program as the second parameter.
 
 The program also uses output redirection to write the generated graph into a file.
 
@@ -159,4 +159,4 @@ VERTICES SIZE: 55
 * CUDA: 12.2.0
 
 ## Dataset
-* See the related paper for links to all the used data sets, and refer to the `Preparing datasets` section on how to ready them or other graphs for running by cuQC.
+* See the related paper for links to all the used data sets, and refer to the `Preparing Datasets` section on how to prepare them or other graphs for running by cuQC.
