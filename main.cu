@@ -35,17 +35,17 @@ using namespace std;
 #define NUMBER_OF_THREADS (NUM_OF_BLOCKS * BLOCK_SIZE)
 
 // DATA STRUCTURE SIZE
-#define TASKS_SIZE 100000000
-#define TASKS_PER_WARP 10
-#define BUFFER_SIZE 100000000
-#define BUFFER_OFFSET_SIZE 1000000
-#define CLIQUES_SIZE 1000000
-#define CLIQUES_OFFSET_SIZE 10000
+#define TASKS_SIZE 200000000
+#define TASKS_PER_WARP 100
+#define BUFFER_SIZE 500000000
+#define BUFFER_OFFSET_SIZE 50000000
+#define CLIQUES_SIZE 100000000
+#define CLIQUES_OFFSET_SIZE 10000000
 #define CLIQUES_PERCENT 50
 // per warp
 #define WCLIQUES_SIZE 10000
 #define WCLIQUES_OFFSET_SIZE 1000
-#define WTASKS_SIZE 100000L
+#define WTASKS_SIZE 300000L
 #define WTASKS_OFFSET_SIZE 10000
 // global memory vertices, should be a multiple of 32 as to not waste space
 #define WVERTICES_SIZE 32000
@@ -304,7 +304,7 @@ void move_to_gpu(CPU_Data& hd, GPU_Data& dd);
 void dump_cliques(CPU_Cliques& hc, GPU_Data& dd, ofstream& output_file);
 void flush_cliques(CPU_Cliques& hc, ofstream& temp_results);
 void free_memory(CPU_Data& hd, GPU_Data& dd, CPU_Cliques& hc);
-void RemoveNonMax(char* szset_filename, char* szoutput_filename);
+void RemoveNonMax(const char* szset_filename, char* szoutput_filename);
 
 // expansion
 void h_expand_level(CPU_Graph& hg, CPU_Data& hd, CPU_Cliques& hc);
@@ -415,8 +415,11 @@ int scheduling_toggle;
 // MAIN
 int main(int argc, char* argv[])
 {
+    // DEBUG - rm
+    cout << TASKS_PER_WARP << endl;
+
     // TIME
-    auto start2 = std::chrono::high_resolution_clock::now();
+    auto start2 = chrono::high_resolution_clock::now();
 
 
 
@@ -459,7 +462,7 @@ int main(int argc, char* argv[])
 
 
     // TIME
-    auto start = std::chrono::high_resolution_clock::now();
+    auto start = chrono::high_resolution_clock::now();
 
 
 
@@ -468,13 +471,23 @@ int main(int argc, char* argv[])
     CPU_Graph hg(graph_stream);
     graph_stream.close();
     calculate_minimum_degrees(hg);
-    ofstream temp_results("temp.txt");
+
+    // generate random name for temp file so multiple programs can be run simultaneously without files overwriting
+    auto now = chrono::system_clock::now();
+    auto now_us = chrono::time_point_cast<chrono::microseconds>(now);
+    auto epoch = now_us.time_since_epoch();
+    auto value = chrono::duration_cast<chrono::microseconds>(epoch);
+    long long tduration = value.count();
+    ostringstream oss;
+    oss << "t_" << tduration << ".txt";
+    string temp_filename = oss.str();
+    ofstream temp_results(temp_filename);
 
 
 
     // TIME
-    auto stop = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
+    auto stop = chrono::high_resolution_clock::now();
+    auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
     cout << "--->:LOADING TIME: " << duration.count() << " ms" << endl;
 
 
@@ -494,22 +507,22 @@ int main(int argc, char* argv[])
 
 
     // TIME
-    auto start1 = std::chrono::high_resolution_clock::now();
+    auto start1 = chrono::high_resolution_clock::now();
 
 
 
     // RM NON-MAX
-    RemoveNonMax("temp.txt", argv[4]);
+    RemoveNonMax(temp_filename.c_str(), argv[4]);
 
 
 
     // TIME
-    auto stop1 = std::chrono::high_resolution_clock::now();
-    auto duration1 = std::chrono::duration_cast<std::chrono::milliseconds>(stop1 - start1);
+    auto stop1 = chrono::high_resolution_clock::now();
+    auto duration1 = chrono::duration_cast<chrono::milliseconds>(stop1 - start1);
     cout << "--->:REMOVE NON-MAX TIME: " << duration1.count() << " ms" << endl;
 
-    auto stop2 = std::chrono::high_resolution_clock::now();
-    auto duration2 = std::chrono::duration_cast<std::chrono::milliseconds>(stop2 - start2);
+    auto stop2 = chrono::high_resolution_clock::now();
+    auto duration2 = chrono::duration_cast<chrono::milliseconds>(stop2 - start2);
     cout << "--->:TOTAL TIME: " << duration2.count() << " ms" << endl;
 
 
@@ -548,7 +561,7 @@ void search(CPU_Graph& hg, ofstream& temp_results)
 
 
     // TIME
-    auto start = std::chrono::high_resolution_clock::now();
+    auto start = chrono::high_resolution_clock::now();
 
 
 
@@ -680,8 +693,8 @@ void search(CPU_Graph& hg, ofstream& temp_results)
 
 
     // TIME
-    auto stop = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
+    auto stop = chrono::high_resolution_clock::now();
+    auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start);
     cout << "--->:ENUMERATION TIME: " << duration.count() << " ms" << endl;
 
 
@@ -2201,7 +2214,7 @@ inline void chkerr(cudaError_t code)
 {
     if (code != cudaSuccess)
     {
-        cout << cudaGetErrorString(code) << std::endl;
+        cout << cudaGetErrorString(code) << endl;
         exit(-1);
     }
 }
@@ -4723,7 +4736,7 @@ void InsertOneSet(int* pset, int nlen, TREE_NODE*& proot)
     }
 }
 
-int BuildTree(char* szset_filename, TREE_NODE*& proot)
+int BuildTree(const char* szset_filename, TREE_NODE*& proot)
 {
     FILE* fp;
     int nlen, * pset, nset_size, i, nmax_len, num_of_sets;
@@ -4936,7 +4949,7 @@ void OutputMaxSet(TREE_NODE* proot, int nmax_len, char* szoutput_filename)
     fclose(fp);
 }
 
-void RemoveNonMax(char* szset_filename, char* szoutput_filename)
+void RemoveNonMax(const char* szset_filename, char* szoutput_filename)
 {
     cout << ">:REMOVING NON-MAXIMAL CLIQUES" << endl;
 
