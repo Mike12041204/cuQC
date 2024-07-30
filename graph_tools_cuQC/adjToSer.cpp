@@ -12,21 +12,12 @@
 #include <chrono>
 #include <cstring>
 #include <sys/timeb.h>
-#include <cuda_runtime.h>
-#include <cuda.h>
-#include <device_launch_parameters.h>
-#include <sm_30_intrinsics.h>
-#include <device_atomic_functions.h>
 using namespace std;
-
-
 
 // buffer size for CPU onehop and twohop adjacency array and offsets, ensure these are large enough
 #define OFFSETS_SIZE 1000000000
 #define LVL1ADJ_SIZE 1000000000
-#define LVL2ADJ_SIZE 10000000000
-
-
+#define LVL2ADJ_SIZE 1000000000
 
 // CPU GRAPH / CONSTRUCTOR
 int h_sort_asce(const void* a, const void* b);
@@ -44,7 +35,7 @@ public:
     int* twohop_neighbors;
     uint64_t* twohop_offsets;
 
-    CPU_Graph(ifstream& graph_stream)
+    CPU_Graph(ifstream& graph_stream, char* output_file)
     {
         graph_stream.seekg(0, graph_stream.end);
         string graph_text(graph_stream.tellg(), 0);
@@ -63,15 +54,13 @@ public:
         int current_number = 0;
         bool empty = true;
 
-
-
         // TODO - way to detect and handle these cases without changing code?
         // TWO FORMATS SO FAR
         // 1 -  VSCode \r\n between lines, no ending character
         // 2 - Visual Studio \n between lines, numerous \0 ending characters
 
         // parse graph file assume adj are seperated by spaces ' ' and vertices are seperated by newlines "\r\n"
-        for (int i = 0; i < graph_text.size(); i++) {
+        for (uint64_t i = 0; i < graph_text.size(); i++) {
             char character = graph_text[i];
 
             // line depends on whether newline is "\r\n" or '\n'
@@ -110,8 +99,6 @@ public:
         number_of_vertices = vertex_count;
         number_of_edges = number_count;
 
-
-
         twohop_offsets = new uint64_t[number_of_vertices + 1];
 
         twohop_offsets[0] = 0;
@@ -121,26 +108,32 @@ public:
         memset(twohop_flag_DIA, true, number_of_vertices * sizeof(bool));
 
         // handle lvl2 adj
+        // first pass only finds total number of lvl2adj
         for (int i = 0; i < vertex_count; i++) {
-            for (int j = onehop_offsets[i]; j < onehop_offsets[i + 1]; j++) {
+
+            uint64_t curr_lvl2 = 0;
+
+            for (uint64_t j = onehop_offsets[i]; j < onehop_offsets[i + 1]; j++) {
                 int lvl1adj = onehop_neighbors[j];
+                // all lvl1adj are lvl2adj
                 if (twohop_flag_DIA[lvl1adj]) {
-                    twohop_neighbors[number_of_lvl2adj++] = lvl1adj;
+                    twohop_neighbors[curr_lvl2++] = lvl1adj;
                     twohop_flag_DIA[lvl1adj] = false;
+                    number_of_lvl2adj++;
                 }
 
-                for (int k = onehop_offsets[lvl1adj]; k < onehop_offsets[lvl1adj + 1]; k++) {
+                for (uint64_t k = onehop_offsets[lvl1adj]; k < onehop_offsets[lvl1adj + 1]; k++) {
                     int lvl2adj = onehop_neighbors[k];
                     if (twohop_flag_DIA[lvl2adj] && lvl2adj != i) {
-                        twohop_neighbors[number_of_lvl2adj++] = lvl2adj;
+                        twohop_neighbors[curr_lvl2++] = lvl2adj;
                         twohop_flag_DIA[lvl2adj] = false;
+                        number_of_lvl2adj++;
                     }
                 }
             }
 
-            twohop_offsets[i + 1] = number_of_lvl2adj;
-
-            for (int j = twohop_offsets[i]; j < twohop_offsets[i + 1]; j++) {
+            // reset lvl2adj DIA
+            for (uint64_t j = 0; j < curr_lvl2; j++) {
                 twohop_flag_DIA[twohop_neighbors[j]] = true;
             }
 
@@ -148,16 +141,9 @@ public:
             if (onehop_offsets[i + 1] != onehop_offsets[i]) {
                 qsort(onehop_neighbors + onehop_offsets[i], onehop_offsets[i + 1] - onehop_offsets[i], sizeof(int), h_sort_asce);
             }
-            if (twohop_offsets[i + 1] != twohop_offsets[i]) {
-                qsort(twohop_neighbors + twohop_offsets[i], twohop_offsets[i + 1] - twohop_offsets[i], sizeof(int), h_sort_asce);
-            }
         }
 
-        delete twohop_flag_DIA;
-    }
-
-    void write_serialized(char* output_file)
-    {
+        // write amounts and onehop information
         ofstream out(output_file);
 
         out << number_of_vertices << endl;
@@ -180,10 +166,52 @@ public:
         }
         out << endl;
 
-        for (int i = 0; i < number_of_lvl2adj; i++) {
-            out << twohop_neighbors[i];
-            if (i < number_of_lvl2adj - 1) {
-                out << " ";
+        // handle lvl2 adj
+        uint64_t orig_lvl2 = number_of_lvl2adj;
+        number_of_lvl2adj = 0;
+        int index = 0;
+
+        for (int i = 0; i < vertex_count; i++) {
+
+            uint64_t curr_lvl2 = 0;
+
+            for (uint64_t j = onehop_offsets[i]; j < onehop_offsets[i + 1]; j++) {
+                int lvl1adj = onehop_neighbors[j];
+                // all lvl1adj are lvl2adj
+                if (twohop_flag_DIA[lvl1adj]) {
+                    twohop_neighbors[curr_lvl2++] = lvl1adj;
+                    twohop_flag_DIA[lvl1adj] = false;
+                    number_of_lvl2adj++;
+                }
+
+                for (uint64_t k = onehop_offsets[lvl1adj]; k < onehop_offsets[lvl1adj + 1]; k++) {
+                    int lvl2adj = onehop_neighbors[k];
+                    if (twohop_flag_DIA[lvl2adj] && lvl2adj != i) {
+                        twohop_neighbors[curr_lvl2++] = lvl2adj;
+                        twohop_flag_DIA[lvl2adj] = false;
+                        number_of_lvl2adj++;
+                    }
+                }
+            }
+
+            twohop_offsets[i + 1] = number_of_lvl2adj;
+
+            // reset lvl2adj DIA
+            for (uint64_t j = 0; j < curr_lvl2; j++) {
+                twohop_flag_DIA[twohop_neighbors[j]] = true;
+            }
+
+            // sort adjacencies
+            if (twohop_offsets[i + 1] != twohop_offsets[i]) {
+                qsort(twohop_neighbors, twohop_offsets[i + 1] - twohop_offsets[i], sizeof(int), h_sort_asce);
+            }
+
+            for (uint64_t j = 0; j < curr_lvl2; j++) {
+                out << twohop_neighbors[j];
+                if (index < orig_lvl2 - 1) {
+                    out << " ";
+                }
+                index++;
             }
         }
         out << endl;
@@ -196,6 +224,7 @@ public:
         }
         out << endl;
 
+        delete twohop_flag_DIA;
         out.close();
     }
 
@@ -207,8 +236,6 @@ public:
         delete twohop_offsets;
     }
 };
-
-
 
 // MAIN
 int main(int argc, char* argv[])
@@ -225,8 +252,7 @@ int main(int argc, char* argv[])
     }
 
     // GRAPH
-    CPU_Graph hg(graph_stream);
-    hg.write_serialized(argv[2]);
+    CPU_Graph hg(graph_stream, argv[2]);
     graph_stream.close();
     
     return 0;

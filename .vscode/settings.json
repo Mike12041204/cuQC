@@ -1,5 +1,19 @@
 {
+    "C_Cpp.errorSquiggles": "enabled",
     "files.associations": {
-        "chrono": "cpp"
-    }
+        "vector": "cpp",
+        "iosfwd": "cpp",
+        "fstream": "cpp",
+        "xlocmes": "cpp",
+        "locale": "cpp",
+        "xstring": "cpp",
+        "stdexcept": "cpp",
+        "ostream": "cpp",
+        "iostream": "cpp",
+        "new": "cpp",
+        "cstddef": "cpp",
+        "string": "cpp"
+    },
+    "makefile.makefilePath": "${workspaceFolder}/Makefile",
+    "makefile.makePath": "C:/Program Files (x86)/GnuWin32/bin/make.exe"
 }

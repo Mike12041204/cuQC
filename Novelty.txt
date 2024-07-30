@@ -1,0 +1,4 @@
+1 - recv only does necessary amount
+2 - use of mpi data structure
+3 - split data in strided manner
+4 - only encodes buffer when we know we are going to be sending
