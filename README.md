@@ -193,6 +193,7 @@ We provide `SBATCH` scripts to run the program with this software. These scripts
 ## Machine
 * CPU: AMD Epyc 7742 Rome
 * GPU: Nvidia Ampere A100 (108SMs, 80GB)
+
 We ran distributed tests using `4` of these nodes.
 
 ## Software
