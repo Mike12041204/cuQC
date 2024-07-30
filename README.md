@@ -1,11 +1,17 @@
 # cuQC: Accelerating Maximal Quasi-Clique Mining using GPUs
-This repository contains the code for the "cuQC: Accelerating Maximal Quasi-Clique Mining using the GPU" paper, as well as related graph formatting tools. The cuQC algorithm is a powerful maximal y-quasi-clique miner for the GPU.
+This repository contains the code for the "cuQC: Accelerating Maximal Quasi-Clique Mining using the GPU" paper, as well as related graph formatting tools. The cuQC algorithm is a powerful maximal quasi-clique miner for the GPU.
 ## Obtaining the Latest Version
 Visit the [cuQC Github](https://github.com/Mike12041204/cuQC) to obtain the latest version of this program.
 ## Package Requirements
 * CUDA(>=12.2.0)
+### For Distributed Version
+* OpenMPI(>=4.1.5)
+* GNU Make(>=3.82)
 
-We used `CUDA 12.2.0`
+## Hardware Requirements
+* Nvidia Ampere GPU with 80GB of global memory
+* CPU with 80GB of memory
+
 ## Preparing Datasets
 Our program runs off graphs represented in a custom serialized format, designed to prevent duplicate processing of graphs. We provide tools to convert graphs to this format.
 ### Software Requirements for Preparing Graphs
@@ -53,6 +59,7 @@ We could use this code and *input* to generate the adjacency list representation
 ```
 python3 edgeToAdj.py input 0 >output
 ```
+# Single GPU Guide
 ## Build Instructions
 We provide a script to build the program. Running `build.sh` will compile the program and produce the `cuQC` executable.
 
@@ -63,10 +70,8 @@ When using cuQC it should be noted that most data structure sizes and their rela
 We have set the program with default definitions which should work on a GPU with `40GB` of global memory for most graphs.
 
 However, if a `segmentation fault` or `bus error` occurs during cuQC's run, these definitions may not be suitable for the graph. These definitions should be corrected by running the program again, this time in debug mode. This mode can be toggled on for cuQC by changing a definition within the program. This definition has the name of `DEBUG_MODE` and has two options: `0 - off` and `1 - on`. When debug mode is on, the program will display information indicating the size of the data within the data structures at each partial step and will provide information on which of these data structures might be causing the memory issue. This mode should allow the fine-tuning of the data structure definitions to allow cuQC to work on numerous graphs of considerable size. As explained in the paper, tuning the definition `TASKS_PER_WARP` may also decrease the memory usage of the program. Of course, at some point, a graph will become too large to run, no matter what definitions are chosen.
-
-It should also be noted that making the definitions for the data structure and thus their sizes as small as possible decreases the time spent by cuQC. This is because some of these data structures must be copied from the CPU to the GPU, and if they are smaller, it will take less time to do so. Thus, when timing cuQC, we would first run the program in debug mode to find some definitions that worked for the graph, then using the data structure size information given by debug mode, we would minimize the definitions to boost the speed of cuQC.
 ## Experiments
-For running experiments with cuQC, the host should have at least `32GB` of memory, and the device should have at least `40GB` of global memory. If the machine doesn't have that much memory, cuQC will still be able to run some experiment scenarios on smaller graphs. However, it may run out of memory, throw an error, and terminate the program in other cases. For some cases, the program may be able to run with the given amount of memory but require tuning of the data structures to do so; refer to the `Build Instructions` section for how to proceed with this.
+For running the experiments presented in the paper with cuQC, the host should have at least `80GB` of memory, and the device should have at least `80GB` of global memory. If the machine doesn't have that much memory, cuQC will still be able to run some experiment scenarios on smaller graphs. However, it may run out of memory, throw an error, and terminate the program in other cases. For some cases, the program may be able to run with the given amount of memory but require tuning of the data structures to do so; refer to the `Build Instructions` section for how to proceed with this.
 
 The program takes 5 parameters:
 1. graph_file, the file to find cliques in
@@ -152,11 +157,49 @@ VERTICES SIZE: 55
 --->:TOTAL TIME: 2144 ms
 >:PROGRAM END
 ```
+# Multiple GPU Guide
+## Accessing Distributed Memory Version
+To acquire the distributed version of cuQC, access the GitHub repository and switch to the `Distributed` branch.
+## Build Instructions
+We provide a Makefile to automatically build the program. Running `make` will compile and link the program and produce the `DcuQC` executable.
+
+Like the single GPU version, if the program encounters a memory error, you can try to tune the data structures to fit the data. Unlike the single GPU version, the data structure sizes are passed as a parameter file rather than internal code. This means the program does not need to be rebuilt every time for dataset tuning. Debug mode is still an internal setting and works the same way.
+
+Also important for the distributed version is the internal definition `NUMBER_OF_PROCESSES`, which indicates how many nodes the program will run on.
+## Experiments
+For running experiments presented in the paper with the distributed version of cuQC, on each node, the host should have `80GB` of memory, and the device should have `80GB` of global memory.
+
+The same tuning described in the single GPU version applies to the distributed version. However, the modification of sizes is different and specified in the above `Build Instructions` section.
+
+The program takes 5 parameters:
+1. graph_file, the file to find cliques in
+2. gamma, the gamma of the cliques to be found, must be >= .5
+3. min_size, the minimum size of the cliques to be found, must be > 1
+4. ds_sizes_file, a file specifying the size of each data structure as well as the expanded threshold
+5. output_file, the file to output the resulting cliques to
+
+In the distributed version, the program is always run with dynamic scheduling, and thus, the parameter is removed.
+
+The program might be run as:
+```
+./DcuQC GSE1730 .9 30 DS_Sizes.csv results_test1
+```
+
+The output for the non-debug mode is the same. For the debug mode, the output looks similar but is formatted slightly differently, and each node will create its own output file.
+
+We provide `SBATCH` scripts to run the program with this software. These scripts should be modified as necessary to run the desired tests on your machine's hardware.
+
 # Benchmarking Platform and Dataset
 ## Machine
+* CPU: AMD Epyc 7742 Rome
 * GPU: Nvidia Ampere A100 (108SMs, 80GB)
+We ran distributed tests using `4` of these nodes.
+
+## Software
 * OS: Red Hat Enterprise Linux Server release 7.9 (Maipo)
 * CUDA: 12.2.0
+* MPI: OpenMPI 4.1.5
+* Make: GNU Make 3.82
 
 ## Dataset
 * See the related paper for links to all the used data sets, and refer to the `Preparing Datasets` section on how to prepare them or other graphs for running by cuQC.
