@@ -280,7 +280,7 @@ WTASKS OFFSET SIZE: 12
 VERTICES SIZE: 55
 ```
 # Video Demonstration
-[![Watch the video](https://youtu.be/GJLzgyHo1_Q)]
+[![Watch the video](https://github.com/Mike12041204/cuQC/blob/cuQC/thumbnail.JPG)](https://www.youtube.com/watch?v=GJLzgyHo1_Q)
 
 # Benchmarking Platform and Dataset
 ## Machine
