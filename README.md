@@ -187,17 +187,17 @@ We provide 2 scripts to pass parameters to and use Slurm.
 
 First, slurm.sh will take the same parameters as cuQC and create an `SBATCH` script to run cuQC across multiple nodes. This script will have to be modified to use the correct configuration on your server; the path to the graph file will also have to be modified for your setup.
 
-This slurm.sh script does not have to be used directly as the second script run.sh calls it and uses its output to submit an SBATCH task directly. It takes 1 additional parameter before the same 5 from cuQC the program's name. Unless you have changed the name of the DcuQC executable, it could be run as such:
+This slurm.sh script does not have to be used directly as the second script run.sh calls it and uses its output to submit a Slurm task directly. It takes 1 additional parameter before the same 5 from cuQC the program's name. Unless you have changed the name of the DcuQC executable, it could be run as such:
 ```
 ./run DcuQC GSE1730 .9 30 DS_Sizes.csv Dist_GSE
 ```
 Running run.sh like this will use Slurm to run cuQC across the node configuration set in slurm.sh.
 
 As multiple nodes are used, there will be significantly more files generated, they have a first letter in the file name which indicates their purpose:
-1. o - output generated for the main output, which looks the same as the single GPU version. It will be written to the o file without a tailing number. This tailing number for the other files indicates that it is the output for a specific node. These files will contain debugging information if the toggle is set to on.
+1. o - output files. The main output will be written to the o file without a tailing number. This tailing number for the other files indicates that it is the output for a specific node. These files will contain debugging information if the toggle is set to on.
 2. e - the error file generated with every Slurm task, which contains all writes to stderr
 3. r - the results file, comparable to results.txt from the single GPU version
-4. t—temp files, containing the temporary results from each node before combining. These files can be ignored unless you need to debug the results.
+4. t - temp files, containing the temporary results from each node before combining. These files can be ignored unless you need to debug the results.
 
 The files generated might look like:
 ```
@@ -211,7 +211,7 @@ cat o_*
 ```
 For non-debugging, the output and results will look the same.
 
-In debugging mode the results will look the same but the output will be formatted to show all nodes processing:
+In debugging mode, the results will look the same, but the output will be formatted to show all nodes processing:
 ```
 >:PRE-PROCESSING
 --->:LOADING TIME: 4 ms
@@ -275,6 +275,8 @@ WTASKS SIZE: 515
 WTASKS OFFSET SIZE: 12
 VERTICES SIZE: 55
 ```
+# Video Demonstration
+TODO - make and imbed video.
 # Benchmarking Platform and Dataset
 ## Machine
 * CPU: AMD Epyc 7742 Rome
