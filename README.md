@@ -289,6 +289,11 @@ We ran distributed tests using `4` of these nodes.
 * MPI: OpenMPI 4.1.5
 * Make: GNU Make 3.82
 ## Dataset
+All datasets used in the papers experiments were taken from:
+* [SNAP](https://snap.stanford.edu/data/)
+* [Network Repository](https://networkrepository.com/index.php)
+* [Netzschleuder](https://networks.skewed.de/)
+
 See the related paper for specific links to all the used data sets, and refer to the `Preparing Datasets` section on how to prepare them or other graphs for running by cuQC.
 # DOI
 [![DOI](https://zenodo.org/badge/617138667.svg)](https://zenodo.org/doi/10.5281/zenodo.10963361)
