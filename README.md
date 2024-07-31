@@ -6,6 +6,7 @@ Visit the [cuQC Github](https://github.com/Mike12041204/cuQC) to obtain the late
 ## Hardware Requirements
 * Nvidia Ampere GPU with 80GB of global memory
 * CPU with 80GB of memory
+  
 Less memory can be used, but not all tests displayed on paper will be able to be run.
 ## Software Requirements
 * CUDA(>=12.2.0)
@@ -13,6 +14,7 @@ Less memory can be used, but not all tests displayed on paper will be able to be
 * GNU Make(>=3.82)
 * GCC (>=8.2.0)
 * Python (>=3.6.8)
+
 For running a single GPU version without preparing graphs, only CUDA is needed.
 
 ## Preparing Datasets
@@ -96,7 +98,8 @@ Sample output:
 --->:TOTAL TIME: 495 ms
 >:PROGRAM END
 ```
-Sample results.txt
+cuQC will write output to a file named results.txt. 
+Sample results.txt:
 ```
 33 0 1 2 3 4 5 8 9 10 11 12 18 19 20 21 23 24 27 30 33 38 40 44 47 48 50 53 56 57 58 73 105 157
 33 0 1 2 3 4 5 8 9 10 11 12 18 19 20 21 23 24 27 30 33 38 40 44 47 48 50 53 56 57 58 73 105 304
@@ -128,12 +131,6 @@ L: 4 T1: 624 22060 T2: 192 7212 B: 0 0 C: 21 640
 .
 .
 .
-```
-Sample debug mode output continued:
-```
-.
-.
-.
 WTasks( TC: 0 TS: 0 MC: 0 MS: 0) WCliques ( TC: 4 TS: 128 MC: 1 MS: 32)
 L: 18 T1: 0 0 T2: 4 128 B: 0 0 C: 3163 98216
 
@@ -162,7 +159,7 @@ To acquire the distributed version of cuQC, access the GitHub repository and swi
 ## Build Instructions
 We provide a Makefile to automatically build the program. Running `make` will compile and link the program and produce the `DcuQC` executable.
 
-Like the single GPU version, if the program encounters a memory error, you can try to tune the data structures to fit the data. Unlike the single GPU version, the data structure sizes are passed as a parameter file rather than internal code. This means the program does not need to be rebuilt every time for dataset tuning. Debug mode is still an internal setting and works the same way.
+Like the single GPU version, data structure sizes are determined statically, and if the program encounters a memory error, you can try to tune the data structures to fit the data. Unlike the single GPU version, the data structure sizes are passed as a parameter file rather than internal code. This means the program does not need to be rebuilt every time for dataset tuning. Debug mode is still an internal setting and works the same way.
 
 Also important for the distributed version is the internal definition `NUMBER_OF_PROCESSES`, which indicates how many nodes the program will run on.
 ## Experiments
@@ -172,29 +169,118 @@ The same tuning described in the single GPU version applies to the distributed v
 
 The program takes 5 parameters:
 1. graph_file, the file to find cliques in
-2. gamma, the gamma of the cliques to be found, must be >= .5
-3. min_size, the minimum size of the cliques to be found, must be > 1
+2. gamma, the gamma of the cliques to be found, must be `>= .5`
+3. min_size, the minimum size of the cliques to be found, must be `> 1`
 4. ds_sizes_file, a file specifying the size of each data structure as well as the expanded threshold
-5. output_file, the file to output the resulting cliques to
+5. output_file, the output tag for files produced by cuQC
 
 In the distributed version, the program is always run with dynamic scheduling, and thus, the parameter is removed.
 
-The program might be run as:
+As this version will use multiple nodes, running it requires running cross-node synchronization software on your server. Our server uses the `Slurm` program.
+
+On an individual node, the program can be run as:
 ```
-./DcuQC GSE1730 .9 30 DS_Sizes.csv results_test1
+./DcuQC GSE1730 .9 30 DS_Sizes.csv Dist_GSE
 ```
 
-The output for the non-debug mode is the same. For the debug mode, the output looks similar but is formatted slightly differently, and each node will create its own output file.
+We provide 2 scripts to pass parameters to and use Slurm.
 
-We provide `SBATCH` scripts to run the program with this software. These scripts should be modified as necessary to run the desired tests on your machine's hardware.
+First, slurm.sh will take the same parameters as cuQC and create an `SBATCH` script to run cuQC across multiple nodes. This script will have to be modified to use the correct configuration on your server; the path to the graph file will also have to be modified for your setup.
 
+This slurm.sh script does not have to be used directly as the second script run.sh calls it and uses its output to submit an SBATCH task directly. It takes 1 additional parameter before the same 5 from cuQC the program's name. Unless you have changed the name of the DcuQC executable, it could be run as such:
+```
+./run DcuQC GSE1730 .9 30 DS_Sizes.csv Dist_GSE
+```
+Running run.sh like this will use Slurm to run cuQC across the node configuration set in slurm.sh.
+
+As multiple nodes are used, there will be significantly more files generated, they have a first letter in the file name which indicates their purpose:
+1. o - output generated for the main output, which looks the same as the single GPU version. It will be written to the o file without a tailing number. This tailing number for the other files indicates that it is the output for a specific node. These files will contain debugging information if the toggle is set to on.
+2. e - the error file generated with every Slurm task, which contains all writes to stderr
+3. r - the results file, comparable to results.txt from the single GPU version
+4. t—temp files, containing the temporary results from each node before combining. These files can be ignored unless you need to debug the results.
+
+The files generated might look like:
+```
+e_Dist_GSE.txt  o_Dist_GSE_0.txt  o_Dist_GSE_2.txt  r_Dist_GSE.txt  t_Dist_GSE_0.txt  t_Dist_GSE_2.txt
+o_Dist_GSE.txt  o_Dist_GSE_1.txt  o_Dist_GSE_3.txt  t_Dist_GSE.txt  t_Dist_GSE_1.txt  t_Dist_GSE_3.txt
+```
+
+Printing all output can be done with:
+```
+cat o_*
+```
+For non-debugging, the output and results will look the same.
+
+In debugging mode the results will look the same but the output will be formatted to show all nodes processing:
+```
+>:PRE-PROCESSING
+--->:LOADING TIME: 4 ms
+>:INITIALIZING TASKS
+>:BEGINNING EXPANSION
+--->:ENUMERATION TIME: 1744 ms
+>:REMOVING NON-MAXIMAL CLIQUES
+>:NUMBER OF MAXIMAL CLIQUES: 1602
+--->:REMOVE NON-MAX TIME: 59 ms
+--->:TOTAL TIME: 2833 ms
+>:PROGRAM END
+
+>:OUTPUT FROM PROCESS: 0
+
+CPU START
+L: 0 T1: 1 55 T2: 0 0 B: 0 0 C: 0 0
+
+L: 1 T1: 1 55 T2: 1 55 B: 0 0 C: 0 0
+
+L: 2 T1: 24 1044 T2: 1 55 B: 0 0 C: 0 0
+
+GPU START
+L: 2 T: 6 270 B: 0 0 C: 0 0
+
+T: 48(12) 1824(464) C: 0(0) 0(0)
+L: 3 T: 48 1824 B: 0 0 C: 0 0
+
+T: 151(9) 5359(342) C: 6(3) 183(91)
+L: 4 T: 151 5359 B: 0 0 C: 6 183
+.
+.
+.
+>:OUTPUT FROM PROCESS: 3
+
+CPU START
+L: 0 T1: 1 55 T2: 0 0 B: 0 0 C: 0 0
+
+L: 1 T1: 1 55 T2: 1 55 B: 0 0 C: 0 0
+
+L: 2 T1: 24 1044 T2: 1 55 B: 0 0 C: 0 0
+
+GPU START
+L: 2 T: 6 252 B: 0 0 C: 0 0
+
+T: 51(12) 1961(515) C: 0(0) 0(0)
+L: 3 T: 51 1961 B: 0 0 C: 0 0
+
+T: 154(9) 5509(348) C: 4(1) 121(31)
+L: 4 T: 154 5509 B: 0 0 C: 4 121
+.
+.
+.
+TASKS SIZE: 12360
+BUFFER SIZE: 0
+BUFFER OFFSET SIZE: 0
+CLIQUES SIZE: 20104
+CLIQUES OFFSET SIZE: 648
+WCLIQUES SIZE: 124
+WCLIQUES OFFSET SIZE: 4
+WTASKS SIZE: 515
+WTASKS OFFSET SIZE: 12
+VERTICES SIZE: 55
+```
 # Benchmarking Platform and Dataset
 ## Machine
 * CPU: AMD Epyc 7742 Rome
 * GPU: Nvidia Ampere A100 (108SMs, 80GB)
 
 We ran distributed tests using `4` of these nodes.
-
 ## Software
 * OS: Red Hat Enterprise Linux Server release 7.9 (Maipo)
 * CUDA: 12.2.0
