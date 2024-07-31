@@ -63,7 +63,7 @@ using namespace std;
 #define CPU_MODE 0
 
 // debug toggle 0-normal/1-debug
-#define DEBUG_TOGGLE 1
+#define DEBUG_TOGGLE 0
 
 
 
