@@ -281,9 +281,7 @@ VERTICES SIZE: 55
 ```
 # Video Demonstration
 
-<video width="320" height="240" controls>
-  <source src="tutorial.mp4" type="video/mp4">
-</video>
+[![Video](https://github.com/Mike12041204/cuQC/blob/cuQC/tutorial.mp4)
 
 # Benchmarking Platform and Dataset
 ## Machine
