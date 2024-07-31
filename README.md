@@ -62,7 +62,11 @@ We could then use *input* and *AtoS* to generate our serialized graph representa
 ```
 # Single GPU Guide
 ## Build Instructions
-We provide a script to build the program. Running `build.sh` will compile the program and produce the `cuQC` executable.
+The program can be built using `nvcc`:
+```
+nvcc main.cu -o cuQC
+```
+This will compile the program and produce the `cuQC` executable.
 
 When using cuQC it should be noted that most data structure sizes and their related memory usage are determined statically at the start of the program through definitions, for example:
 ```
@@ -159,7 +163,7 @@ To acquire the distributed version of cuQC, access the GitHub repository and swi
 ## Build Instructions
 We provide a Makefile to automatically build the program. Running `make` will compile and link the program and produce the `DcuQC` executable.
 
-Like the single GPU version, data structure sizes are determined statically, and if the program encounters a memory error, you can try to tune the data structures to fit the data. Unlike the single GPU version, the data structure sizes are passed as a parameter file rather than internal code. This means the program does not need to be rebuilt every time for dataset tuning. Debug mode is still an internal setting and works the same way.
+Like the single GPU version, data structure sizes are determined statically, and if the program encounters a memory error, you can try to tune the data structures to fit the data. Unlike the single GPU version, the data structure sizes are passed as a parameter file rather than internal code. This means the program does not need to be rebuilt every time for dataset tuning. Debug mode is still an internal setting and works the same way; however, it is located in the `inc/common.h` file rather than `main.cu`.
 
 Also important for the distributed version is the internal definition `NUMBER_OF_PROCESSES`, which indicates how many nodes the program will run on.
 ## Experiments
@@ -289,10 +293,11 @@ We ran distributed tests using `4` of these nodes.
 * MPI: OpenMPI 4.1.5
 * Make: GNU Make 3.82
 ## Dataset
-All datasets used in the papers experiments were taken from:
+All datasets used in the paper's experiments were taken from:
 * [SNAP](https://snap.stanford.edu/data/)
 * [Network Repository](https://networkrepository.com/index.php)
 * [Netzschleuder](https://networks.skewed.de/)
+* [GEO](https://www.ncbi.nlm.nih.gov/geo/)
 
 See the related paper for specific links to all the used data sets, and refer to the `Preparing Datasets` section on how to prepare them or other graphs for running by cuQC.
 # DOI
