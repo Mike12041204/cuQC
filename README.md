@@ -288,12 +288,9 @@ We ran distributed tests using `4` of these nodes.
 * CUDA: 12.2.0
 * MPI: OpenMPI 4.1.5
 * Make: GNU Make 3.82
-
 ## Dataset
-* See the related paper for links to all the used data sets, and refer to the `Preparing Datasets` section on how to prepare them or other graphs for running by cuQC.
-
+See the related paper for specific links to all the used data sets, and refer to the `Preparing Datasets` section on how to prepare them or other graphs for running by cuQC.
 # DOI
 [![DOI](https://zenodo.org/badge/617138667.svg)](https://zenodo.org/doi/10.5281/zenodo.10963361)
-
 # License
 Refer to LICENSE.md in the root directory.
