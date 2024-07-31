@@ -11,9 +11,6 @@
 // MAIN
 int main(int argc, char* argv[])
 {
-    // DEBUG - rm
-    cout << HELP_MULTIPLIER << endl;
-
     // TIME
     auto start2 = chrono::high_resolution_clock::now();
 
