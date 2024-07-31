@@ -62,7 +62,11 @@ We could then use *input* and *AtoS* to generate our serialized graph representa
 ```
 # Single GPU Guide
 ## Build Instructions
-We provide a script to build the program. Running `build.sh` will compile the program and produce the `cuQC` executable.
+The program can be built using `nvcc`:
+```
+nvcc main.cu -o cuQC
+```
+This will compile the program and produce the `cuQC` executable.
 
 When using cuQC it should be noted that most data structure sizes and their related memory usage are determined statically at the start of the program through definitions, for example:
 ```
