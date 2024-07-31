@@ -280,7 +280,7 @@ WTASKS OFFSET SIZE: 12
 VERTICES SIZE: 55
 ```
 # Video Demonstration
-TODO - make and imbed video.
+[![Video](file:tutorial.mp4)
 # Benchmarking Platform and Dataset
 ## Machine
 * CPU: AMD Epyc 7742 Rome
