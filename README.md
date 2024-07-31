@@ -163,7 +163,7 @@ To acquire the distributed version of cuQC, access the GitHub repository and swi
 ## Build Instructions
 We provide a Makefile to automatically build the program. Running `make` will compile and link the program and produce the `DcuQC` executable.
 
-Like the single GPU version, data structure sizes are determined statically, and if the program encounters a memory error, you can try to tune the data structures to fit the data. Unlike the single GPU version, the data structure sizes are passed as a parameter file rather than internal code. This means the program does not need to be rebuilt every time for dataset tuning. Debug mode is still an internal setting and works the same way.
+Like the single GPU version, data structure sizes are determined statically, and if the program encounters a memory error, you can try to tune the data structures to fit the data. Unlike the single GPU version, the data structure sizes are passed as a parameter file rather than internal code. This means the program does not need to be rebuilt every time for dataset tuning. Debug mode is still an internal setting and works the same way; however, it is located in the `inc/common.h` file rather than `main.cu`.
 
 Also important for the distributed version is the internal definition `NUMBER_OF_PROCESSES`, which indicates how many nodes the program will run on.
 ## Experiments
